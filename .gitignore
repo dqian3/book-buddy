@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+.vite/
+
+# Generated data (regenerate with `npm run seed`). The large dictionary in
+# particular shouldn't live in git.
+public/data/dict/
+public/data/books/

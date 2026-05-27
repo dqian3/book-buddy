@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior-y: none;
+}
+
+@layer components {
+  /* A word the user tapped; the dictionary popup is anchored to it. */
+  .word-active {
+    @apply rounded bg-amber-200 dark:bg-amber-500/40;
+  }
+  /* The block currently being read aloud by TTS. */
+  .tts-active {
+    @apply bg-sky-100 dark:bg-sky-500/20;
+  }
+}
+
+/* Honor the device safe areas (notches) on mobile. */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}

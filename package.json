@@ -1,0 +1,39 @@
+{
+  "name": "babel-book-buddy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A mobile-friendly reading companion for foreign and archaic books: tap-to-define dictionary, AI assistant, spoiler-aware retrieval, and free text-to-speech.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "ingest": "node scripts/ingest.mjs",
+    "build:dict": "node scripts/build-dict.mjs",
+    "seed": "node scripts/build-dict.mjs && node scripts/ingest.mjs \"books/射雕英雄传-金庸-converted.html\" --lang zh --id shediao --title \"射雕英雄传\" --author \"金庸\"",
+    "verify": "node scripts/verify.mjs",
+    "verify:ai": "node scripts/verify-ai.mjs"
+  },
+  "dependencies": {
+    "idb": "^8.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "cheerio": "^1.0.0",
+    "fflate": "^0.8.2",
+    "pdfjs-dist": "^4.7.76",
+    "playwright": "^1.60.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}
