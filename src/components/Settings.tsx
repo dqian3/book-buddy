@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import * as RadixSwitch from "@radix-ui/react-switch";
 import { useReader } from "../state/reader";
 import { useSettings, DEFAULT_MODELS, type ProviderId } from "../state/settings";
 import { tts } from "../lib/tts/speech";
@@ -11,23 +12,18 @@ const PROVIDERS: { id: ProviderId | ""; label: string }[] = [
   { id: "ollama", label: "Ollama (local)" },
 ];
 
-const EXPLANATION = [
-  { id: "en", label: "English" },
-  { id: "zh", label: "中文" },
-  { id: "both", label: "Both" },
-] as const;
-
 export function Settings() {
   const { panel, setPanel } = useReader();
+  const open = panel === "settings";
   const s = useSettings();
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
 
   useEffect(() => {
-    if (panel === "settings") tts.ready().then(setVoices);
-  }, [panel]);
+    if (open) tts.ready().then(setVoices);
+  }, [open]);
 
   return (
-    <Panel open={panel === "settings"} onClose={() => setPanel(null)} title="Settings">
+    <Panel open={open} onClose={() => setPanel(null)} title="Settings">
       <Section title="Reading">
         <Row label="Theme">
           <Segmented
@@ -41,6 +37,9 @@ export function Settings() {
         </Row>
         <Row label="Show pinyin">
           <Toggle checked={s.showPinyin} onChange={(v) => s.update({ showPinyin: v })} />
+        </Row>
+        <Row label="Show translation on hover">
+          <Toggle checked={s.hoverTranslate} onChange={(v) => s.update({ hoverTranslate: v })} />
         </Row>
       </Section>
 
@@ -102,7 +101,11 @@ export function Settings() {
         ) : null}
 
         <Row label="Explain in">
-          <Segmented value={s.explanationLanguage} options={EXPLANATION.map((e) => [e.id, e.label])} onChange={(v) => s.update({ explanationLanguage: v as typeof s.explanationLanguage })} />
+          <Segmented
+            value={s.explainIn}
+            options={[["user", "My language"], ["book", "Book language"]]}
+            onChange={(v) => s.update({ explainIn: v as typeof s.explainIn })}
+          />
         </Row>
         <Row label="Avoid spoilers">
           <Toggle checked={s.spoilerFree} onChange={(v) => s.update({ spoilerFree: v })} />
@@ -174,14 +177,13 @@ function Field({
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
   return (
-    <button
-      onClick={() => onChange(!checked)}
-      className={`relative h-6 w-11 rounded-full transition-colors ${checked ? "bg-sky-600" : "bg-slate-300 dark:bg-slate-600"}`}
-      role="switch"
-      aria-checked={checked}
+    <RadixSwitch.Root
+      checked={checked}
+      onCheckedChange={onChange}
+      className="relative h-6 w-11 shrink-0 cursor-pointer rounded-full bg-slate-300 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2 data-[state=checked]:bg-sky-600 dark:bg-slate-600 dark:focus-visible:ring-offset-slate-900"
     >
-      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${checked ? "translate-x-5" : "translate-x-0.5"}`} />
-    </button>
+      <RadixSwitch.Thumb className="block h-5 w-5 translate-x-0.5 rounded-full bg-white shadow-sm transition-transform data-[state=checked]:translate-x-[1.375rem]" />
+    </RadixSwitch.Root>
   );
 }
 

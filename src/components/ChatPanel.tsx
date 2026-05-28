@@ -79,7 +79,7 @@ export function ChatPanel() {
     const system = buildSystemPrompt({
       template: settings.systemTemplate,
       book: { title: book.title, author: book.author, language: book.language },
-      explanationLanguage: settings.explanationLanguage,
+      explainIn: settings.explainIn,
       tone: settings.tone,
     });
     const contextMsg = buildContextMessage({ chunks: ctxChunks, spoilerFree: settings.spoilerFree, locationLabel });

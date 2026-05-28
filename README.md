@@ -76,15 +76,6 @@ src/components       Reader · DictPopup · ChatPanel · Settings · Toc · …
 A book's `language` selects the tokenizer + dictionary, so supporting a new
 language is "add an adapter + ingest a book."
 
-## Verification
-
-With the dev server running (`npm run dev`):
-
-```bash
-npm run verify     # drives the real app in headless Chromium (reader, tap-to-define, nav, panels, TTS)
-npm run verify:ai  # full chat pipeline against a local mock provider (prompt, spoiler context, streaming)
-```
-
 ## Roadmap (not yet built)
 
 - Semantic embeddings (transformers.js) to replace lexical retrieval.

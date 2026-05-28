@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { DEFAULT_SYSTEM_TEMPLATE, type ExplanationLanguage } from "../lib/ai/prompts";
+import { DEFAULT_SYSTEM_TEMPLATE, type ExplainIn } from "../lib/ai/prompts";
 
 export type ProviderId = "claude" | "openai" | "ollama";
 export type ThemePref = "light" | "dark" | "system";
@@ -22,6 +22,7 @@ export interface SettingsState {
   theme: ThemePref;
   fontScale: number;
   showPinyin: boolean;
+  hoverTranslate: boolean;
 
   // TTS
   ttsRate: number;
@@ -31,7 +32,7 @@ export interface SettingsState {
   spoilerFree: boolean;
   provider: ProviderId | "";
   providerConfig: ProviderConfig;
-  explanationLanguage: ExplanationLanguage;
+  explainIn: ExplainIn;
   tone: string;
   systemTemplate: string;
 
@@ -47,6 +48,7 @@ export const useSettings = create<SettingsState>()(
       theme: "system",
       fontScale: 1.1,
       showPinyin: true,
+      hoverTranslate: false,
 
       ttsRate: 1,
       ttsVoiceURI: null,
@@ -58,7 +60,7 @@ export const useSettings = create<SettingsState>()(
         openai: { apiKey: "", model: DEFAULT_MODELS.openai, baseUrl: "https://api.openai.com/v1" },
         ollama: { baseUrl: "http://localhost:11434", model: DEFAULT_MODELS.ollama },
       },
-      explanationLanguage: "both",
+      explainIn: "user",
       tone: "",
       systemTemplate: DEFAULT_SYSTEM_TEMPLATE,
 

@@ -32,14 +32,16 @@ export default function App() {
       {status === "ready" && book ? (
         <>
           <TopBar />
-          <main className="min-h-0 flex-1">
-            <Reader />
-          </main>
-          <Toc />
-          <BookmarksPanel />
-          <VocabPanel />
-          <ChatPanel />
-          <Settings />
+          <div className="relative flex min-h-0 flex-1 overflow-hidden">
+            <Toc />
+            <main className="min-h-0 flex-1">
+              <Reader />
+            </main>
+            <BookmarksPanel />
+            <VocabPanel />
+            <ChatPanel />
+            <Settings />
+          </div>
         </>
       ) : status === "loading" ? (
         <div className="flex h-full items-center justify-center">

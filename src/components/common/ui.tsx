@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { IconClose } from "../Icons";
+import { IconChevronLeft, IconChevronRight } from "../Icons";
 
 export function IconButton({
   onClick,
@@ -30,8 +30,11 @@ export function IconButton({
 }
 
 /**
- * A modal panel. On phones it slides up as a bottom sheet; on wider screens it
- * docks to the right as a drawer. Used for TOC, chat, settings, bookmarks, vocab.
+ * A collapsible side panel. On desktop it docks beside the reader as a flex
+ * sidebar (text stays interactive). On phones the flex row has no room for
+ * both, so the panel absolutely overlays the reader inside the row — the
+ * TopBar stays visible and the chevron collapses it. Lives inside the reader's
+ * flex row; only one panel is mounted at a time.
  */
 export function Panel({
   open,
@@ -55,26 +58,23 @@ export function Panel({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
+  // Only the open panel is mounted, and we don't animate width — animating a
+  // flex sidebar's width forces the whole reader to re-layout every frame.
   if (!open) return null;
-  const sideClass = side === "right" ? "sm:right-0" : "sm:left-0";
+  const border = side === "left" ? "border-r" : "border-l";
   return (
-    <div className="fixed inset-0 z-40">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div
-        role="dialog"
-        aria-modal="true"
-        className={`absolute inset-x-0 bottom-0 flex max-h-[88vh] flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-slate-900 sm:inset-y-0 sm:bottom-auto sm:top-0 sm:max-h-none sm:w-[26rem] sm:max-w-[92vw] sm:rounded-none ${sideClass} safe-bottom`}
-      >
-        <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-          <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{title}</h2>
-          <IconButton onClick={onClose} label="Close">
-            <IconClose className="h-5 w-5" />
-          </IconButton>
-        </header>
-        <div className="flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
-        {footer && <div className="border-t border-slate-200 p-3 dark:border-slate-700">{footer}</div>}
-      </div>
-    </div>
+    <aside
+      className={`absolute inset-0 z-30 flex h-full w-full flex-col bg-white dark:bg-slate-900 sm:static sm:inset-auto sm:z-auto sm:w-[26rem] sm:max-w-[92vw] sm:shrink-0 ${border} border-slate-200 dark:border-slate-700`}
+    >
+      <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-700">
+        <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">{title}</h2>
+        <IconButton onClick={onClose} label="Collapse panel">
+          {side === "left" ? <IconChevronLeft className="h-5 w-5" /> : <IconChevronRight className="h-5 w-5" />}
+        </IconButton>
+      </header>
+      <div className="flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
+      {footer && <div className="border-t border-slate-200 p-3 dark:border-slate-700">{footer}</div>}
+    </aside>
   );
 }
 

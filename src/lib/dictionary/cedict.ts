@@ -2,7 +2,7 @@ import type { Dictionary, DictEntry } from "./types";
 import { toToneMarks } from "./pinyin";
 import { kvGet, kvSet } from "../storage/db";
 
-// Shape of public/data/dict/cc-cedict.json (produced by scripts/build-dict.mjs).
+// Shape of public/data/dict/cc-cedict.json (produced by scripts/lang/zh/build-dict.mjs).
 interface RawEntry {
   t?: string; // traditional, if different from the simplified headword
   p: string; // numeric pinyin

@@ -26,7 +26,7 @@ Third-party data and credits:
 
 - Dictionary data is CC-CEDICT, licensed CC BY-SA 4.0
   (https://cc-cedict.org/ , https://www.mdbg.net/chinese/dictionary?page=cc-cedict).
-  It is downloaded by scripts/build-dict.mjs and is not redistributed in this
+  It is downloaded by scripts/lang/zh/build-dict.mjs and is not redistributed in this
   repository. Any distribution that bundles the generated dictionary file must
   comply with CC BY-SA 4.0.
 

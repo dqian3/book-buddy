@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Block, Position } from "../lib/book/model";
 import { isTextBlock } from "../lib/book/model";
 import type { TokenizeResult } from "../lib/tokenizer/types";
@@ -14,15 +14,79 @@ import { SelectionBar } from "./SelectionBar";
 import { IconChevronLeft, IconChevronRight } from "./Icons";
 
 export function Reader() {
-  const { book, sectionIndex, services, active, setActive, setSection, consumeScroll, setTts } = useReader();
+  // Subscribe to fields individually so panel/selection changes (e.g. opening a
+  // sidebar) don't re-render the reader and rebuild every block in the section.
+  const book = useReader((s) => s.book);
+  const sectionIndex = useReader((s) => s.sectionIndex);
+  const services = useReader((s) => s.services);
+  const active = useReader((s) => s.active);
   const ttsBlockId = useReader((s) => s.ttsBlockId);
-  const { fontScale } = useSettings();
+  const setActive = useReader((s) => s.setActive);
+  const setSection = useReader((s) => s.setSection);
+  const consumeScroll = useReader((s) => s.consumeScroll);
+  const setTts = useReader((s) => s.setTts);
+  // Select only the settings fields the reader uses, so unrelated settings
+  // changes (typing the system prompt, theme, provider keys…) don't re-render
+  // the reader and rebuild every block.
+  const fontScale = useSettings((s) => s.fontScale);
+  const hoverTranslate = useSettings((s) => s.hoverTranslate);
+  const showPinyin = useSettings((s) => s.showPinyin);
   const setProgress = useLibrary((s) => s.setProgress);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const blockEls = useRef<Map<string, HTMLElement>>(new Map());
+  // Gates progress saving so the IntersectionObserver can't overwrite the saved
+  // resume position with block 0 before the resume scroll has been applied.
+  const trackingRef = useRef(false);
+  // Pending scroll target read once per section (see resume effect below).
+  const resumeRef = useRef<{ section: number; target: number | null }>({ section: -1, target: null });
 
   const section = book?.sections[sectionIndex];
+
+  // --- Hover to translate (optional) ---------------------------------------
+  const [hover, setHover] = useState<HoverInfo | null>(null);
+  const hoverKey = useRef("");
+  const lastPt = useRef({ x: -1, y: -1 });
+
+  const onMouseMove = useCallback(
+    (e: React.MouseEvent) => {
+      if (!hoverTranslate || !services || useReader.getState().active) return;
+      // Throttle: ignore tiny jitters between word-sized movements.
+      const x = e.clientX, y = e.clientY;
+      if (Math.abs(x - lastPt.current.x) < 4 && Math.abs(y - lastPt.current.y) < 4) return;
+      lastPt.current = { x, y };
+
+      const clear = () => { setHover(null); hoverKey.current = ""; };
+
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.toString().trim()) return clear();
+
+      const target = (e.target as HTMLElement).closest<HTMLElement>("[data-block-index]");
+      if (!target) return clear();
+      const block = section?.blocks[Number(target.dataset.blockIndex)];
+      if (!block || !isTextBlock(block)) return clear();
+
+      const idx = charIndexFromPoint(target, x, y);
+      if (idx === null) return clear();
+      const token = services.tokenizer.tokenizeAt(block.text!, idx);
+      if (!token) return clear();
+
+      const key = `${block.id}:${token.start}:${token.end}`;
+      if (key === hoverKey.current) return; // same word — keep the current tooltip
+      hoverKey.current = key;
+
+      const entries = services.dictionary?.lookup(token.word) ?? [];
+      const rect = rectForRange(target, token.start, token.end);
+      if (entries.length === 0 || !rect) return setHover(null);
+      setHover({ word: token.word, pinyin: entries[0].pinyin, defs: entries[0].defs, rect });
+    },
+    [hoverTranslate, services, section]
+  );
+
+  const clearHover = useCallback(() => { setHover(null); hoverKey.current = ""; }, []);
+
+  // The click popup takes over from the hover tooltip; drop any stale hover.
+  useEffect(() => { if (active) clearHover(); }, [active, clearHover]);
 
   // --- Tap to define -------------------------------------------------------
   const lookupAt = useCallback(
@@ -136,14 +200,32 @@ export function Reader() {
 
   // --- Resume / jump scrolling --------------------------------------------
   useLayoutEffect(() => {
-    const target = consumeScroll();
-    if (target == null) {
-      scrollRef.current?.scrollTo({ top: 0 });
-      return;
+    // Read the pending scroll target once per section. Mount effects fire twice
+    // under StrictMode (and could re-fire otherwise); consuming again returns
+    // null and would scroll us back to the top, so reuse the value per section.
+    if (resumeRef.current.section !== sectionIndex) {
+      resumeRef.current = { section: sectionIndex, target: consumeScroll() };
     }
-    const el = blockEls.current.get(section?.blocks[target]?.id ?? "");
-    if (el) el.scrollIntoView({ block: "start" });
-    else scrollRef.current?.scrollTo({ top: 0 });
+    const target = resumeRef.current.target;
+    trackingRef.current = false; // pause progress saving until we've anchored
+    const apply = () => {
+      if (target == null) {
+        scrollRef.current?.scrollTo({ top: 0 });
+        return;
+      }
+      const el = blockEls.current.get(section?.blocks[target]?.id ?? "");
+      if (el) el.scrollIntoView({ block: "start" });
+      else scrollRef.current?.scrollTo({ top: 0 });
+    };
+    apply();
+    // Re-apply after layout settles, then start tracking. Without this the
+    // position can land slightly off (and the observer below would then save
+    // that wrong spot, corrupting the saved position for the next refresh).
+    const raf = requestAnimationFrame(() => {
+      apply();
+      trackingRef.current = true;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [sectionIndex, consumeScroll]);
 
   // --- Progress tracking (topmost visible block) --------------------------
@@ -154,6 +236,7 @@ export function Reader() {
     let raf = 0;
     const save = () => {
       raf = 0;
+      if (!trackingRef.current) return; // don't clobber the resume target before anchoring
       let bestIdx = 0;
       let bestTop = Infinity;
       for (const [idx, top] of tops) {
@@ -183,10 +266,10 @@ export function Reader() {
   useEffect(() => {
     const root = scrollRef.current;
     if (!root) return;
-    const onScroll = () => useReader.getState().active && setActive(null);
+    const onScroll = () => { if (useReader.getState().active) setActive(null); clearHover(); };
     root.addEventListener("scroll", onScroll, { passive: true });
     return () => root.removeEventListener("scroll", onScroll);
-  }, [setActive]);
+  }, [setActive, clearHover]);
 
   const registerBlock = useCallback((id: string) => (el: HTMLElement | null) => {
     if (el) blockEls.current.set(id, el);
@@ -205,6 +288,8 @@ export function Reader() {
         onClick={onClick}
         onMouseUp={onSelectionEnd}
         onTouchEnd={onSelectionEnd}
+        onMouseMove={onMouseMove}
+        onMouseLeave={clearHover}
       >
         <article
           data-testid="reader"
@@ -237,6 +322,7 @@ export function Reader() {
       </div>
 
       {active && <DictPopup active={active} onPickToken={onPickToken} onClose={() => setActive(null)} />}
+      {hover && !active && hoverTranslate && <HoverTooltip info={hover} showPinyin={showPinyin} />}
       <SelectionBar />
     </div>
   );
@@ -317,6 +403,51 @@ function highlightActive(text: string, active: ActiveLookup) {
       <span className="word-active">{text.slice(start, end)}</span>
       {text.slice(end)}
     </>
+  );
+}
+
+interface HoverInfo {
+  word: string;
+  pinyin?: string;
+  defs: string[];
+  /** Anchor rect (viewport coords) of the hovered word. */
+  rect: DOMRect;
+}
+
+/** A small, non-interactive translation tooltip shown while hovering a word. */
+function HoverTooltip({ info, showPinyin }: { info: HoverInfo; showPinyin: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const { rect } = info;
+    const left = Math.min(Math.max(8, rect.left + rect.width / 2 - w / 2), window.innerWidth - w - 8);
+    const above = rect.top - h - 8 >= 8;
+    const top = above ? rect.top - h - 8 : Math.min(rect.bottom + 8, window.innerHeight - h - 8);
+    setPos({ left, top });
+  }, [info]);
+
+  return (
+    <div
+      ref={ref}
+      data-testid="hover-tooltip"
+      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? "visible" : "hidden" }}
+      className="pointer-events-none fixed z-30 max-w-[18rem] rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-xl dark:border-slate-700 dark:bg-slate-800"
+    >
+      <div className="flex items-baseline gap-2">
+        <span className="font-reading text-base leading-tight text-slate-900 dark:text-slate-100">{info.word}</span>
+        {showPinyin && info.pinyin && <span className="text-xs text-sky-700 dark:text-sky-300">{info.pinyin}</span>}
+      </div>
+      {info.defs.length > 0 && (
+        <div className="mt-0.5 line-clamp-2 text-xs leading-snug text-slate-600 dark:text-slate-300">
+          {info.defs.slice(0, 3).join("; ")}
+        </div>
+      )}
+    </div>
   );
 }
 

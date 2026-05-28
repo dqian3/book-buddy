@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// Downloads CC-CEDICT (MDBG) and builds a compact lookup index for the app.
+// Chinese (zh) dictionary builder. Downloads CC-CEDICT (MDBG) and builds a
+// compact lookup index for the app. Language-specific build steps live under
+// scripts/lang/<code>/; this is the only one so far.
 //
 // Output: public/data/dict/cc-cedict.json
 //   {
@@ -15,7 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CEDICT_URL = "https://www.mdbg.net/chinese/export/cedict/cedict_1_0_ts_utf-8_mdbg.txt.gz";
-const OUT_DIR = fileURLToPath(new URL("../public/data/dict", import.meta.url));
+const OUT_DIR = fileURLToPath(new URL("../../../public/data/dict", import.meta.url));
 
 async function main() {
   console.log(`Downloading CC-CEDICT…\n  ${CEDICT_URL}`);
