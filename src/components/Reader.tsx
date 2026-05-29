@@ -5,7 +5,7 @@ import type { TokenizeResult } from "../lib/tokenizer/types";
 import { assetUrl } from "../lib/book/loader";
 import { charIndexFromPoint, rectForRange } from "../lib/dom/caret";
 import { sentenceAround } from "../lib/text";
-import { tts, ttsLangFor, type Segment } from "../lib/tts/speech";
+import { tts } from "../lib/tts/speech";
 import { useReader, type ActiveLookup } from "../state/reader";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
@@ -24,7 +24,6 @@ export function Reader() {
   const setActive = useReader((s) => s.setActive);
   const setSection = useReader((s) => s.setSection);
   const consumeScroll = useReader((s) => s.consumeScroll);
-  const setTts = useReader((s) => s.setTts);
   // Select only the settings fields the reader uses, so unrelated settings
   // changes (typing the system prompt, theme, provider keys…) don't re-render
   // the reader and rebuild every block.
@@ -169,32 +168,6 @@ export function Reader() {
     }
   }, [sectionIndex]);
 
-  // --- Text to speech ------------------------------------------------------
-  const speakFrom = useCallback(
-    (fromIndex: number) => {
-      if (!section || !book) return;
-      const segments: Segment[] = section.blocks
-        .map((b, i) => ({ b, i }))
-        .filter(({ b, i }) => i >= fromIndex && isTextBlock(b))
-        .map(({ b }) => ({ id: b.id, text: b.text! }));
-      if (!segments.length) return;
-      setActive(null);
-      tts.speak(
-        segments,
-        { lang: ttsLangFor(book.language), rate: useSettings.getState().ttsRate, voiceURI: useSettings.getState().ttsVoiceURI },
-        {
-          onSegmentStart: (id) => {
-            setTts(id, true);
-            blockEls.current.get(id)?.scrollIntoView({ block: "center", behavior: "smooth" });
-          },
-          onEnd: () => setTts(null, false),
-          onError: () => setTts(null, false),
-        }
-      );
-    },
-    [section, book, setActive, setTts]
-  );
-
   // Stop speech when leaving the section/book.
   useEffect(() => () => tts.stop(), [sectionIndex]);
 
@@ -308,7 +281,6 @@ export function Reader() {
               isTts={ttsBlockId === block.id}
               active={active && active.position.blockIndex === i ? active : null}
               registerRef={registerBlock(block.id)}
-              onPlay={() => speakFrom(i)}
             />
           ))}
 
@@ -335,7 +307,6 @@ function BlockView({
   active,
   isTts,
   registerRef,
-  onPlay,
 }: {
   block: Block;
   bookId: string;
@@ -343,7 +314,6 @@ function BlockView({
   active: ActiveLookup | null;
   isTts: boolean;
   registerRef: (el: HTMLElement | null) => void;
-  onPlay: () => void;
 }) {
   const ttsClass = isTts ? "tts-active" : "";
 
@@ -361,8 +331,7 @@ function BlockView({
   const common = {
     ref: registerRef as never,
     "data-block-index": index,
-    onDoubleClick: onPlay,
-    title: "Tap a word to define · double-tap to read aloud from here",
+    title: "Tap a word to define",
   };
 
   if (block.type === "heading") {

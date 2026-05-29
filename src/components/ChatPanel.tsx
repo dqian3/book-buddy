@@ -1,29 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import type { Chunk } from "../lib/book/model";
 import { useReader } from "../state/reader";
 import { useChat } from "../state/chat";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
-import { createProvider, type ChatTurn } from "../lib/ai";
-import { buildSystemPrompt, buildContextMessage } from "../lib/ai/prompts";
-import { retrieve, visibleChunks } from "../lib/retrieval";
+import { createProvider, type ChatTurn, type MessagePart } from "../lib/ai";
+import { buildSystemPrompt } from "../lib/ai/prompts";
+import { ALL_TOOLS, executeTool, type ToolContext } from "../lib/ai/tools";
 import { Panel } from "./common/ui";
 import { IconSend, IconStop, IconTrash } from "./Icons";
 
-// Evenly sample visible chunks — used for "summary so far" where no single
-// passage is the target.
-function sampleVisible(chunks: Chunk[], k: number): Chunk[] {
-  if (chunks.length <= k) return chunks;
-  const step = chunks.length / k;
-  return Array.from({ length: k }, (_, i) => chunks[Math.floor(i * step)]);
-}
-
 const QUICK_ACTIONS = [
   { label: "Explain selection", build: (sel: string) => sel && `Explain this passage and its tricky words:\n「${sel}」` },
-  { label: "Summary so far", mode: "summary" as const, build: () => "Give me a spoiler-free recap of what has happened up to where I am now." },
+  { label: "Summary so far", build: () => "Give me a spoiler-free recap of what has happened up to where I am now." },
   { label: "Key vocabulary", build: (sel: string) => `List and explain the key vocabulary I should know${sel ? ` in:\n「${sel}」` : " around where I'm reading"}.` },
   { label: "Grammar / usage", build: (sel: string) => `Explain the grammar and sentence structure${sel ? ` of:\n「${sel}」` : " of the passage I'm reading"}.` },
 ];
+
+// Cap so a runaway model can't loop forever.
+const MAX_AGENT_STEPS = 5;
 
 export function ChatPanel() {
   const { book, chunks, sectionIndex, panel, setPanel, selection, consumeChatPrefill } = useReader();
@@ -51,11 +45,13 @@ export function ChatPanel() {
 
   if (!book) return null;
 
-  const send = async (text: string, mode?: "summary") => {
+  const send = async (text: string) => {
     const userText = text.trim();
     if (!userText || busy) return;
     setInput("");
 
+    // Conversation history we send to the model — only finalized text turns.
+    // Within-turn tool traffic is ephemeral and not persisted.
     const prior: ChatTurn[] = messages(book.id)
       .filter((m) => !m.pending && !m.error && m.content)
       .map((m) => ({ role: m.role, content: m.content }));
@@ -71,41 +67,76 @@ export function ChatPanel() {
 
     const position = progress[book.id] ?? { sectionIndex, blockIndex: 0 };
     const locationLabel = book.sections[position.sectionIndex]?.title;
-    const ctxChunks =
-      mode === "summary"
-        ? sampleVisible(visibleChunks(chunks, settings.spoilerFree, position), 10)
-        : retrieve(userText, chunks, { spoilerFree: settings.spoilerFree, position });
+    const toolCtx: ToolContext = { chunks, spoilerFree: settings.spoilerFree, position };
 
     const system = buildSystemPrompt({
       template: settings.systemTemplate,
       book: { title: book.title, author: book.author, language: book.language },
       explainIn: settings.explainIn,
       tone: settings.tone,
+      locationLabel,
+      spoilerFree: settings.spoilerFree,
     });
-    const contextMsg = buildContextMessage({ chunks: ctxChunks, spoilerFree: settings.spoilerFree, locationLabel });
-    const apiMessages: ChatTurn[] = [...prior, { role: "user", content: `${contextMsg}\n\n${userText}` }];
+
+    const agentMessages: ChatTurn[] = [...prior, { role: "user", content: userText }];
 
     setBusy(true);
     abortRef.current = new AbortController();
-    let acc = "";
+    let visible = ""; // what the user sees in the assistant bubble
+
     try {
-      await provider.chat({
-        system,
-        messages: apiMessages,
-        signal: abortRef.current.signal,
-        onToken: (delta) => {
-          acc += delta;
-          update(book.id, asstId, { content: acc, pending: true });
-        },
-      });
-      update(book.id, asstId, { content: acc, pending: false });
+      for (let step = 0; step < MAX_AGENT_STEPS; step++) {
+        const stepStartLen = visible.length;
+        const result = await provider.chat({
+          system,
+          messages: agentMessages,
+          tools: ALL_TOOLS,
+          signal: abortRef.current.signal,
+          onToken: (delta) => {
+            visible += delta;
+            update(book.id, asstId, { content: visible, pending: true });
+          },
+        });
+
+        // If the provider didn't stream (e.g. text arrived only in the final
+        // result), surface it now.
+        if (visible.length === stepStartLen && result.text) {
+          visible += result.text;
+          update(book.id, asstId, { content: visible, pending: true });
+        }
+
+        if (!result.needsTools) break;
+
+        // Record the assistant turn (text + tool_use parts) so the model can
+        // see its own request when we feed back results.
+        const assistantParts: MessagePart[] = [];
+        if (result.text) assistantParts.push({ type: "text", text: result.text });
+        for (const c of result.toolCalls)
+          assistantParts.push({ type: "tool_use", id: c.id, name: c.name, input: c.input });
+        agentMessages.push({ role: "assistant", content: assistantParts });
+
+        // Run each tool and show the user what was searched.
+        const resultParts: MessagePart[] = [];
+        for (const call of result.toolCalls) {
+          const hint = formatToolHint(call.name, call.input);
+          if (hint) {
+            visible += (visible.endsWith("\n\n") || visible === "" ? "" : "\n\n") + hint + "\n\n";
+            update(book.id, asstId, { content: visible, pending: true });
+          }
+          const out = executeTool(call.name, call.input, toolCtx);
+          resultParts.push({ type: "tool_result", tool_use_id: call.id, content: out });
+        }
+        agentMessages.push({ role: "user", content: resultParts });
+      }
+
+      update(book.id, asstId, { content: visible, pending: false });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const aborted = msg.includes("abort");
       update(book.id, asstId, {
-        content: acc || (aborted ? "(stopped)" : `⚠️ ${msg}`),
+        content: visible || (aborted ? "(stopped)" : `⚠️ ${msg}`),
         pending: false,
-        error: !aborted && !acc,
+        error: !aborted && !visible,
       });
     } finally {
       setBusy(false);
@@ -141,7 +172,7 @@ export function ChatPanel() {
                 <button
                   key={a.label}
                   disabled={busy}
-                  onClick={() => send(text, a.mode)}
+                  onClick={() => send(text)}
                   className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-200 disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300"
                 >
                   {a.label}
@@ -185,7 +216,7 @@ export function ChatPanel() {
       <div ref={listRef} className="space-y-3">
         {msgs.length === 0 && (
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Ask me to explain a word, translate a line, or recap the story. I’ll use the book for context
+            Ask me to explain a word, translate a line, or recap the story. I’ll consult the book as needed
             {settings.spoilerFree ? " — and stay spoiler-free, only using what you've read." : "."}
           </p>
         )}
@@ -211,4 +242,12 @@ export function ChatPanel() {
       )}
     </Panel>
   );
+}
+
+function formatToolHint(name: string, input: Record<string, unknown>): string {
+  if (name === "search_book") {
+    const q = typeof input.query === "string" ? input.query : "";
+    return q ? `🔎 searching: ${q}` : "🔎 searching the book";
+  }
+  return `⚙️ ${name}`;
 }

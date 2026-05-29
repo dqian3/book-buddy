@@ -1,5 +1,3 @@
-import type { Chunk } from "../book/model";
-
 /** The reader's native language. Hardcoded for now; could become a setting if
  *  non-English speakers want to use the app. The book's language is per-book. */
 export const USER_LANGUAGE = "English";
@@ -8,9 +6,9 @@ export const USER_LANGUAGE = "English";
 export type ExplainIn = "user" | "book";
 
 // The user-editable persona/instructions. Placeholders {book} {author}
-// {language} are filled in; the explain-in directive, spoiler rules,
-// selection, and retrieved context are appended by the builder from live
-// settings so the toggles always win.
+// {language} are filled in; the explain-in directive, tone, location, and
+// tool-use note are appended by the builder from live settings so the toggles
+// always win.
 export const DEFAULT_SYSTEM_TEMPLATE = `You are a warm, patient reading companion helping me read "{book}"{author}, which is written in {language}.
 
 Your job is to help me understand the text and language, not to do the reading for me.
@@ -18,7 +16,7 @@ Your job is to help me understand the text and language, not to do the reading f
 Guidelines:
 - Explain meanings clearly and concisely. For a word or phrase, give the meaning first, then nuance: tone, register, and any classical/archaic, idiomatic, or wordplay usage.
 - Where helpful, include a pronunciation aid for the original language (e.g. pinyin for Chinese, romaji for Japanese).
-- Ground your answers in the passage and the provided context. Don't invent plot details.
+- Ground your answers in the passage. Don't invent plot details.
 - When I've selected text, focus on that selection.`;
 
 export interface BuildSystemArgs {
@@ -26,6 +24,10 @@ export interface BuildSystemArgs {
   book: { title: string; author?: string; language: string };
   explainIn: ExplainIn;
   tone?: string;
+  /** Human-readable current location, e.g. "第一回 风雪惊变". */
+  locationLabel?: string;
+  /** When true, restrict the agent to what the reader has already read. */
+  spoilerFree: boolean;
 }
 
 const LANGUAGE_NAMES: Record<string, string> = {
@@ -53,43 +55,38 @@ export function explanationDirective(explainIn: ExplainIn, bookLanguage: string)
   return `Always write your explanations in ${USER_LANGUAGE}. When you discuss a word or phrase, keep the original ${src} term inline (with a pronunciation aid where the script isn't Latin) so I learn the source wording.`;
 }
 
-/** Fill the editable template and append the explain-in + tone rules. */
-export function buildSystemPrompt({ template, book, explainIn, tone }: BuildSystemArgs): string {
+/** Fill the editable template and append live-settings directives + the tool
+ *  instructions. */
+export function buildSystemPrompt({
+  template,
+  book,
+  explainIn,
+  tone,
+  locationLabel,
+  spoilerFree,
+}: BuildSystemArgs): string {
   const lang = languageName(book.language);
   const filled = template
     .replaceAll("{book}", book.title)
     .replaceAll("{author}", book.author ? ` by ${book.author}` : "")
     .replaceAll("{language}", lang);
 
-  const directive = explanationDirective(explainIn, book.language);
-  const parts = [filled, "", directive];
+  const parts: string[] = [filled, "", explanationDirective(explainIn, book.language)];
   if (tone?.trim()) parts.push("", `Style/level preference: ${tone.trim()}`);
-  return parts.join("\n");
-}
 
-export interface ContextArgs {
-  chunks: Chunk[];
-  spoilerFree: boolean;
-  /** Human-readable current location, e.g. "第一回 风雪惊变". */
-  locationLabel?: string;
-}
+  parts.push(
+    "",
+    `Reader's current location: ${locationLabel || "the beginning"}.`,
+    "",
+    "You have a `search_book` tool that returns passages from the book. Use it whenever your answer depends on the text — to find a scene, look up a word in context, check a name, recall what just happened, etc. Prefer queries written in the book's original language. You can call it multiple times if the first results aren't enough. If a question doesn't need the book (e.g. a general grammar question), just answer."
+  );
 
-/**
- * Build the retrieved-context block injected before the user's question. With
- * spoiler-free on, only passages up to the reader's position are included and
- * the model is told not to look ahead.
- */
-export function buildContextMessage({ chunks, spoilerFree, locationLabel }: ContextArgs): string {
-  const header = spoilerFree
-    ? `The reader is currently at: ${locationLabel || "the beginning"}.
-IMPORTANT: Avoid spoilers. Only use the passages below (everything the reader has read so far). Do not reveal or hint at anything that happens later in the book. If asked about something not yet read, say it hasn't happened yet.`
-    : `Relevant passages from the book (full text available):`;
-
-  if (chunks.length === 0) {
-    return `${header}\n\n(No specific passage retrieved.)`;
+  if (spoilerFree) {
+    parts.push(
+      "",
+      "SPOILER-FREE MODE: `search_book` only returns passages up to the reader's current location. Do not reveal or hint at anything that happens later in the book. If asked about something not yet read, say it hasn't happened yet."
+    );
   }
-  const body = chunks
-    .map((c) => `[${c.sectionTitle}]\n${c.text}`)
-    .join("\n\n---\n\n");
-  return `${header}\n\n<context>\n${body}\n</context>`;
+
+  return parts.join("\n");
 }

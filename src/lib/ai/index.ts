@@ -4,7 +4,7 @@ import { createOpenAIProvider } from "./openai";
 import { createOllamaProvider } from "./ollama";
 import type { ProviderId, ProviderConfig } from "../../state/settings";
 
-export type { AIProvider, ChatTurn, ChatRequest } from "./provider";
+export type { AIProvider, ChatTurn, ChatRequest, ChatResult, MessagePart, ToolCall, ToolDefinition } from "./provider";
 
 export interface ResolvedProvider {
   provider?: AIProvider;
