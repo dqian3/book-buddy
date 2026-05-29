@@ -3,6 +3,7 @@ import * as RadixSwitch from "@radix-ui/react-switch";
 import { useReader } from "../state/reader";
 import { useSettings, DEFAULT_MODELS, type ProviderId } from "../state/settings";
 import { tts } from "../lib/tts/speech";
+import { languageName, USER_LANGUAGE } from "../lib/ai/prompts";
 import { Panel } from "./common/ui";
 
 const PROVIDERS: { id: ProviderId | ""; label: string }[] = [
@@ -13,10 +14,11 @@ const PROVIDERS: { id: ProviderId | ""; label: string }[] = [
 ];
 
 export function Settings() {
-  const { panel, setPanel } = useReader();
+  const { panel, setPanel, book } = useReader();
   const open = panel === "settings";
   const s = useSettings();
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const bookLang = book ? languageName(book.language) : "Book language";
 
   useEffect(() => {
     if (open) tts.ready().then(setVoices);
@@ -103,7 +105,7 @@ export function Settings() {
         <Row label="Explain in">
           <Segmented
             value={s.explainIn}
-            options={[["user", "My language"], ["book", "Book language"]]}
+            options={[["user", USER_LANGUAGE], ["book", bookLang], ["both", "Both"]]}
             onChange={(v) => s.update({ explainIn: v as typeof s.explainIn })}
           />
         </Row>

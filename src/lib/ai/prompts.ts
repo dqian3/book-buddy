@@ -2,8 +2,8 @@
  *  non-English speakers want to use the app. The book's language is per-book. */
 export const USER_LANGUAGE = "English";
 
-/** Which of the two language slots the AI should explain in. */
-export type ExplainIn = "user" | "book";
+/** Which language(s) the AI should explain in. */
+export type ExplainIn = "user" | "book" | "both";
 
 // The user-editable persona/instructions. Placeholders {book} {author}
 // {language} are filled in; the explain-in directive, tone, location, and
@@ -45,12 +45,15 @@ export function languageName(code: string): string {
 }
 
 /** Build the "explain in" directive: explain in the user's language (with the
- *  source term kept inline so they learn it) or in the book's language (full
- *  immersion). */
+ *  source term kept inline so they learn it), in the book's language (full
+ *  immersion), or both side by side. */
 export function explanationDirective(explainIn: ExplainIn, bookLanguage: string): string {
   const src = languageName(bookLanguage);
   if (explainIn === "book") {
     return `Always write your explanations in ${src}. Use plain, clear ${src} with short sentences — I'm learning ${src} by reading this book.`;
+  }
+  if (explainIn === "both") {
+    return `Give every explanation in both ${src} and ${USER_LANGUAGE}: the ${src} version first (so I get immersion practice), then the ${USER_LANGUAGE} version below it so I can check my understanding. Keep each side concise.`;
   }
   return `Always write your explanations in ${USER_LANGUAGE}. When you discuss a word or phrase, keep the original ${src} term inline (with a pronunciation aid where the script isn't Latin) so I learn the source wording.`;
 }

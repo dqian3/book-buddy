@@ -412,8 +412,8 @@ function HoverTooltip({ info, showPinyin }: { info: HoverInfo; showPinyin: boole
         {showPinyin && info.pinyin && <span className="text-xs text-sky-700 dark:text-sky-300">{info.pinyin}</span>}
       </div>
       {info.defs.length > 0 && (
-        <div className="mt-0.5 line-clamp-2 text-xs leading-snug text-slate-600 dark:text-slate-300">
-          {info.defs.slice(0, 3).join("; ")}
+        <div className="mt-0.5 text-xs leading-snug text-slate-600 dark:text-slate-300">
+          {info.defs.join("; ")}
         </div>
       )}
     </div>

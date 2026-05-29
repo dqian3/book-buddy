@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useReader } from "../state/reader";
 import { useChat } from "../state/chat";
 import { useLibrary } from "../state/library";
@@ -153,13 +155,6 @@ export function ChatPanel() {
       title={
         <div className="flex items-center gap-2">
           <span>AI assistant</span>
-          <button
-            onClick={() => settings.update({ spoilerFree: !settings.spoilerFree })}
-            className={`rounded-full px-2 py-0.5 text-xs ${settings.spoilerFree ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300" : "bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-300"}`}
-            title="When on, the AI only sees what you've already read"
-          >
-            {settings.spoilerFree ? "spoiler-free" : "full book"}
-          </button>
         </div>
       }
       footer={
@@ -231,7 +226,13 @@ export function ChatPanel() {
                   : "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100"
             }`}
           >
-            <p className="whitespace-pre-wrap break-words">{m.content || (m.pending ? "…" : "")}</p>
+            {m.role === "user" ? (
+              <p className="whitespace-pre-wrap break-words">{m.content}</p>
+            ) : m.content ? (
+              <MarkdownBubble text={m.content} />
+            ) : m.pending ? (
+              <ThinkingIndicator />
+            ) : null}
           </div>
         ))}
       </div>
@@ -247,7 +248,28 @@ export function ChatPanel() {
 function formatToolHint(name: string, input: Record<string, unknown>): string {
   if (name === "search_book") {
     const q = typeof input.query === "string" ? input.query : "";
-    return q ? `🔎 searching: ${q}` : "🔎 searching the book";
+    return q ? `🔎 *searching: ${q}*` : "🔎 *searching the book*";
   }
-  return `⚙️ ${name}`;
+  return `⚙️ *${name}*`;
+}
+
+// Renders assistant messages with basic markdown (headings, lists, bold, code,
+// tables). Spacing utilities are scoped inside the bubble.
+function MarkdownBubble({ text }: { text: string }) {
+  return (
+    <div className="break-words text-sm leading-relaxed [&_a]:underline [&_code]:rounded [&_code]:bg-black/10 [&_code]:px-1 [&_code]:text-[0.92em] [&_em]:italic [&_h1]:my-1 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:my-1 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:my-1 [&_h3]:text-sm [&_h3]:font-semibold [&_li]:my-0.5 [&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-black/10 [&_pre]:p-2 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_strong]:font-semibold [&_table]:my-2 [&_table]:border-collapse [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-slate-300 [&_th]:px-2 [&_th]:py-1 [&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5 dark:[&_code]:bg-white/10 dark:[&_pre]:bg-white/10 dark:[&_td]:border-slate-600 dark:[&_th]:border-slate-600">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
+// Three bouncing dots shown before the model produces its first token.
+function ThinkingIndicator() {
+  return (
+    <span className="inline-flex items-center gap-1 py-1" aria-label="Thinking">
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current opacity-60" style={{ animationDelay: "0ms" }} />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current opacity-60" style={{ animationDelay: "150ms" }} />
+      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current opacity-60" style={{ animationDelay: "300ms" }} />
+    </span>
+  );
 }
