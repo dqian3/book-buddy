@@ -1,7 +1,18 @@
+import type { Book, Position } from "../lib/book/model";
 import { useReader } from "../state/reader";
 import { useLibrary } from "../state/library";
 import { Panel } from "./common/ui";
 import { IconBookmark, IconTrash } from "./Icons";
+
+function labelFor(book: Book, pos: Position): string {
+  const section = book.sections[pos.sectionIndex];
+  const sectionTitle = section?.title || `Section ${pos.sectionIndex + 1}`;
+  let n = 0;
+  for (let i = 0; i <= pos.blockIndex && i < (section?.blocks.length ?? 0); i++) {
+    if (section!.blocks[i].type === "paragraph") n++;
+  }
+  return n > 0 ? `${sectionTitle} · ¶${n}` : sectionTitle;
+}
 
 export function BookmarksPanel() {
   const { book, sectionIndex, panel, setPanel, setSection } = useReader();
@@ -10,12 +21,9 @@ export function BookmarksPanel() {
 
   const mine = bookmarks.filter((b) => b.bookId === book.id);
   const here = progress[book.id] ?? { sectionIndex, blockIndex: 0 };
-  const sectionTitle = book.sections[here.sectionIndex]?.title || `Section ${here.sectionIndex + 1}`;
 
   const addHere = () => {
-    const label = window.prompt("Bookmark label:", sectionTitle);
-    if (label === null) return;
-    addBookmark({ bookId: book.id, position: here, label: label || sectionTitle });
+    addBookmark({ bookId: book.id, position: here, label: labelFor(book, here) });
   };
 
   return (

@@ -33,16 +33,14 @@ export function SelectionBar() {
   };
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4 safe-bottom">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2 py-1.5 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-800/95">
-        <span className="max-w-[8rem] truncate px-2 text-xs text-slate-400">“{short}”</span>
-        <Action onClick={explain} icon={<IconSparkles className="h-4 w-4" />} label="Explain" />
-        <Action onClick={translate} icon={<IconBookOpen className="h-4 w-4" />} label="Translate" />
-        <Action onClick={read} icon={<IconSpeaker className="h-4 w-4" />} label="Read" />
-        <button onClick={dismiss} aria-label="Dismiss" className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
-          <IconClose className="h-4 w-4" />
-        </button>
-      </div>
+    <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2 py-1.5 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-800/95">
+      <span className="max-w-[8rem] truncate px-2 text-xs text-slate-400">“{short}”</span>
+      <Action onClick={explain} icon={<IconSparkles className="h-4 w-4" />} label="Explain" />
+      <Action onClick={translate} icon={<IconBookOpen className="h-4 w-4" />} label="Translate" />
+      <Action onClick={read} icon={<IconSpeaker className="h-4 w-4" />} label="Read" />
+      <button onClick={dismiss} aria-label="Dismiss" className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+        <IconClose className="h-4 w-4" />
+      </button>
     </div>
   );
 }

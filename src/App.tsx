@@ -9,6 +9,7 @@ import { TopBar } from "./components/TopBar";
 import { Toc } from "./components/Toc";
 import { ChatPanel } from "./components/ChatPanel";
 import { PlaybackBar } from "./components/PlaybackBar";
+import { SelectionBar } from "./components/SelectionBar";
 import { Settings } from "./components/Settings";
 import { BookmarksPanel } from "./components/BookmarksPanel";
 import { VocabPanel } from "./components/VocabPanel";
@@ -43,7 +44,12 @@ export default function App() {
             <ChatPanel />
             <Settings />
           </div>
-          <PlaybackBar />
+          {/* Reading transport sits bottom-left, the selection bar bottom-right;
+              they wrap to separate lines when there isn't room for both. */}
+          <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex flex-wrap items-end gap-2 px-4 safe-bottom">
+            <PlaybackBar />
+            <div className="ml-auto"><SelectionBar /></div>
+          </div>
         </>
       ) : status === "loading" ? (
         <div className="flex h-full items-center justify-center">

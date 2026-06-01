@@ -11,7 +11,6 @@ import { useReader, type ActiveLookup } from "../state/reader";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
 import { DictPopup } from "./DictPopup";
-import { SelectionBar } from "./SelectionBar";
 import { IconChevronLeft, IconChevronRight } from "./Icons";
 
 export function Reader() {
@@ -22,6 +21,7 @@ export function Reader() {
   const services = useReader((s) => s.services);
   const active = useReader((s) => s.active);
   const ttsBlockId = useReader((s) => s.ttsBlockId);
+  const pendingScrollBlock = useReader((s) => s.pendingScrollBlock);
   const setActive = useReader((s) => s.setActive);
   const setSection = useReader((s) => s.setSection);
   const consumeScroll = useReader((s) => s.consumeScroll);
@@ -198,11 +198,16 @@ export function Reader() {
 
   // --- Resume / jump scrolling --------------------------------------------
   useLayoutEffect(() => {
-    // Read the pending scroll target once per section. Mount effects fire twice
-    // under StrictMode (and could re-fire otherwise); consuming again returns
-    // null and would scroll us back to the top, so reuse the value per section.
+    // Three triggers: new section opened, same-section jump (e.g. bookmark
+    // click), and StrictMode's double-mount. On a section change we consume
+    // the pending target once and remember it in resumeRef so re-fires reuse
+    // it instead of resetting to top. On a same-section jump, pendingScrollBlock
+    // flips non-null → we consume it and update the remembered target.
     if (resumeRef.current.section !== sectionIndex) {
       resumeRef.current = { section: sectionIndex, target: consumeScroll() };
+    } else if (pendingScrollBlock !== null) {
+      resumeRef.current.target = pendingScrollBlock;
+      consumeScroll();
     }
     const target = resumeRef.current.target;
     trackingRef.current = false; // pause progress saving until we've anchored
@@ -224,7 +229,7 @@ export function Reader() {
       trackingRef.current = true;
     });
     return () => cancelAnimationFrame(raf);
-  }, [sectionIndex, consumeScroll]);
+  }, [sectionIndex, pendingScrollBlock, section, consumeScroll]);
 
   // --- Progress tracking (topmost visible block) --------------------------
   useEffect(() => {
@@ -344,7 +349,6 @@ export function Reader() {
             : null;
         return props && <DictPopup {...props} />;
       })()}
-      <SelectionBar />
     </div>
   );
 }
