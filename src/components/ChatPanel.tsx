@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useReader } from "../state/reader";
@@ -11,7 +11,7 @@ import { buildSystemPrompt } from "../lib/ai/prompts";
 import { ALL_TOOLS, executeTool, type ToolContext } from "../lib/ai/tools";
 import { isTextBlock } from "../lib/book/model";
 import { Panel } from "./common/ui";
-import { IconSend, IconStop, IconTrash } from "./Icons";
+import { IconSend, IconStop, IconTrash, IconPlus } from "./Icons";
 
 const QUICK_ACTIONS = [
   { label: "Explain selection", build: (sel: string) => sel && `Explain this passage and its tricky words:\n「${sel}」` },
@@ -25,7 +25,13 @@ const MAX_AGENT_STEPS = 5;
 
 export function ChatPanel() {
   const { book, chunks, sectionIndex, panel, setPanel, selection, consumeChatPrefill } = useReader();
-  const { messages, add, update, clear } = useChat();
+  const newChat = useChat((s) => s.newChat);
+  const setActiveChat = useChat((s) => s.setActive);
+  const addMessage = useChat((s) => s.addMessage);
+  const updateMessage = useChat((s) => s.updateMessage);
+  const deleteChat = useChat((s) => s.deleteChat);
+  const conversations = useChat((s) => (book ? s.conversations[book.id] : undefined));
+  const activeChatId = useChat((s) => (book ? s.activeId[book.id] : undefined));
   const progress = useLibrary((s) => s.progress);
   const settings = useSettings();
   const [input, setInput] = useState("");
@@ -34,19 +40,22 @@ export function ChatPanel() {
   const listRef = useRef<HTMLDivElement>(null);
 
   const open = panel === "chat";
-  const msgs = book ? messages(book.id) : [];
+  const convList = useMemo(() => [...(conversations ?? [])].sort((a, b) => b.updatedAt - a.updatedAt), [conversations]);
+  const activeConv = (conversations ?? []).find((c) => c.id === activeChatId) ?? null;
+  const msgs = activeConv?.messages ?? [];
 
   // Pull in a prefilled question from a tap/selection action. If the caller
   // asked for auto-submit (e.g. the highlight bar's "Explain"), skip the
   // composer and fire the request straight away.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !book) return;
     const pre = consumeChatPrefill();
     if (!pre) return;
+    if (pre.newChat) newChat(book.id); // highlight actions start a fresh conversation
     if (pre.autoSubmit) send(pre.text);
     else setInput(pre.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, consumeChatPrefill]);
+  }, [open, book, consumeChatPrefill]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -61,16 +70,16 @@ export function ChatPanel() {
 
     // Conversation history we send to the model — only finalized text turns.
     // Within-turn tool traffic is ephemeral and not persisted.
-    const prior: ChatTurn[] = messages(book.id)
+    const prior: ChatTurn[] = (useChat.getState().active(book.id)?.messages ?? [])
       .filter((m) => !m.pending && !m.error && m.content)
       .map((m) => ({ role: m.role, content: m.content }));
 
-    add(book.id, { role: "user", content: userText });
-    const asstId = add(book.id, { role: "assistant", content: "", pending: true });
+    addMessage(book.id, { role: "user", content: userText });
+    const asstId = addMessage(book.id, { role: "assistant", content: "", pending: true });
 
     const { provider, error } = createProvider(settings.provider, settings.providerConfig);
     if (error || !provider) {
-      update(book.id, asstId, { content: error ?? "No AI provider configured.", pending: false, error: true });
+      updateMessage(book.id, asstId, { content: error ?? "No AI provider configured.", pending: false, error: true });
       return;
     }
 
@@ -108,7 +117,7 @@ export function ChatPanel() {
           signal: abortRef.current.signal,
           onToken: (delta) => {
             visible += delta;
-            update(book.id, asstId, { content: visible, pending: true });
+            updateMessage(book.id, asstId, { content: visible, pending: true });
           },
         });
 
@@ -116,7 +125,7 @@ export function ChatPanel() {
         // result), surface it now.
         if (visible.length === stepStartLen && result.text) {
           visible += result.text;
-          update(book.id, asstId, { content: visible, pending: true });
+          updateMessage(book.id, asstId, { content: visible, pending: true });
         }
 
         if (result.usage) {
@@ -146,7 +155,7 @@ export function ChatPanel() {
           const hint = formatToolHint(call.name, call.input);
           if (hint) {
             visible += (visible.endsWith("\n\n") || visible === "" ? "" : "\n\n") + hint + "\n\n";
-            update(book.id, asstId, { content: visible, pending: true });
+            updateMessage(book.id, asstId, { content: visible, pending: true });
           }
           const out = executeTool(call.name, call.input, toolCtx);
           resultParts.push({ type: "tool_result", tool_use_id: call.id, content: out });
@@ -154,11 +163,11 @@ export function ChatPanel() {
         agentMessages.push({ role: "user", content: resultParts });
       }
 
-      update(book.id, asstId, { content: visible, pending: false });
+      updateMessage(book.id, asstId, { content: visible, pending: false });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const aborted = msg.includes("abort");
-      update(book.id, asstId, {
+      updateMessage(book.id, asstId, {
         content: visible || (aborted ? "(stopped)" : `⚠️ ${msg}`),
         pending: false,
         error: !aborted && !visible,
@@ -231,6 +240,27 @@ export function ChatPanel() {
         </div>
       }
     >
+      <div className="mb-3 flex items-center gap-2">
+        {convList.length > 0 && (
+          <select
+            value={activeConv?.id ?? ""}
+            onChange={(e) => setActiveChat(book.id, e.target.value)}
+            className="min-w-0 flex-1 truncate rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+            aria-label="Conversation history"
+          >
+            {convList.map((c) => (
+              <option key={c.id} value={c.id}>{c.title}</option>
+            ))}
+          </select>
+        )}
+        <button
+          onClick={() => newChat(book.id)}
+          className="ml-auto flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          <IconPlus className="h-3.5 w-3.5" /> New chat
+        </button>
+      </div>
+
       <div ref={listRef} className="space-y-3">
         {msgs.length === 0 && (
           <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -259,9 +289,9 @@ export function ChatPanel() {
           </div>
         ))}
       </div>
-      {msgs.length > 0 && (
-        <button onClick={() => clear(book.id)} className="mt-3 flex items-center gap-1 text-xs text-slate-400 hover:text-red-500">
-          <IconTrash className="h-3.5 w-3.5" /> Clear conversation
+      {activeConv && msgs.length > 0 && (
+        <button onClick={() => deleteChat(book.id, activeConv.id)} className="mt-3 flex items-center gap-1 text-xs text-slate-400 hover:text-red-500">
+          <IconTrash className="h-3.5 w-3.5" /> Delete this chat
         </button>
       )}
     </Panel>

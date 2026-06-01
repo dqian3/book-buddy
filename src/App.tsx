@@ -8,6 +8,7 @@ import { Reader } from "./components/Reader";
 import { TopBar } from "./components/TopBar";
 import { Toc } from "./components/Toc";
 import { ChatPanel } from "./components/ChatPanel";
+import { PlaybackBar } from "./components/PlaybackBar";
 import { Settings } from "./components/Settings";
 import { BookmarksPanel } from "./components/BookmarksPanel";
 import { VocabPanel } from "./components/VocabPanel";
@@ -42,6 +43,7 @@ export default function App() {
             <ChatPanel />
             <Settings />
           </div>
+          <PlaybackBar />
         </>
       ) : status === "loading" ? (
         <div className="flex h-full items-center justify-center">

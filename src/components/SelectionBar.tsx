@@ -20,11 +20,11 @@ export function SelectionBar() {
   };
 
   const explain = () => {
-    openChatWith(`Please explain this passage and any tricky words in it:\n「${text}」`, { autoSubmit: true });
+    openChatWith(`Please explain this passage and any tricky words in it:\n「${text}」`, { autoSubmit: true, newChat: true });
     dismiss();
   };
   const translate = () => {
-    openChatWith(`Translate this passage and note any nuance:\n「${text}」`, { autoSubmit: true });
+    openChatWith(`Translate this passage and note any nuance:\n「${text}」`, { autoSubmit: true, newChat: true });
     dismiss();
   };
   const read = () => {
