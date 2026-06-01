@@ -5,9 +5,11 @@ import { useReader } from "../state/reader";
 import { useChat } from "../state/chat";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
+import { useUsage } from "../state/usage";
 import { createProvider, type ChatTurn, type MessagePart } from "../lib/ai";
 import { buildSystemPrompt } from "../lib/ai/prompts";
 import { ALL_TOOLS, executeTool, type ToolContext } from "../lib/ai/tools";
+import { isTextBlock } from "../lib/book/model";
 import { Panel } from "./common/ui";
 import { IconSend, IconStop, IconTrash } from "./Icons";
 
@@ -34,11 +36,16 @@ export function ChatPanel() {
   const open = panel === "chat";
   const msgs = book ? messages(book.id) : [];
 
-  // Pull in a prefilled question from a tap/selection action.
+  // Pull in a prefilled question from a tap/selection action. If the caller
+  // asked for auto-submit (e.g. the highlight bar's "Explain"), skip the
+  // composer and fire the request straight away.
   useEffect(() => {
     if (!open) return;
     const pre = consumeChatPrefill();
-    if (pre) setInput(pre);
+    if (!pre) return;
+    if (pre.autoSubmit) send(pre.text);
+    else setInput(pre.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, consumeChatPrefill]);
 
   useEffect(() => {
@@ -67,8 +74,12 @@ export function ChatPanel() {
       return;
     }
 
+    const chatModel = settings.providerConfig[provider.id as keyof typeof settings.providerConfig]?.model ?? provider.id;
+
     const position = progress[book.id] ?? { sectionIndex, blockIndex: 0 };
     const locationLabel = book.sections[position.sectionIndex]?.title;
+    const currentBlock = book.sections[position.sectionIndex]?.blocks[position.blockIndex];
+    const currentParagraph = currentBlock && isTextBlock(currentBlock) ? currentBlock.text : undefined;
     const toolCtx: ToolContext = { chunks, spoilerFree: settings.spoilerFree, position };
 
     const system = buildSystemPrompt({
@@ -77,6 +88,7 @@ export function ChatPanel() {
       explainIn: settings.explainIn,
       tone: settings.tone,
       locationLabel,
+      currentParagraph,
       spoilerFree: settings.spoilerFree,
     });
 
@@ -105,6 +117,17 @@ export function ChatPanel() {
         if (visible.length === stepStartLen && result.text) {
           visible += result.text;
           update(book.id, asstId, { content: visible, pending: true });
+        }
+
+        if (result.usage) {
+          useUsage.getState().record({
+            provider: provider.id,
+            model: chatModel,
+            kind: "chat",
+            calls: 1,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+          });
         }
 
         if (!result.needsTools) break;

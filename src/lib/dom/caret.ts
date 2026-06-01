@@ -39,6 +39,20 @@ export function charIndexFromPoint(container: HTMLElement, x: number, y: number)
   return null;
 }
 
+/** Absolute character index within `container` for a (node, offset) caret —
+ *  e.g. the start of a Selection range. */
+export function charIndexOfNode(container: HTMLElement, node: Node, offset: number): number | null {
+  if (!container.contains(node)) return null;
+  let idx = 0;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let n: Node | null;
+  while ((n = walker.nextNode())) {
+    if (n === node) return idx + offset;
+    idx += n.textContent?.length ?? 0;
+  }
+  return idx;
+}
+
 /** Find the text node + local offset for an absolute index within container. */
 function locate(container: HTMLElement, index: number): CaretPos | null {
   let idx = 0;
@@ -52,13 +66,24 @@ function locate(container: HTMLElement, index: number): CaretPos | null {
   return null;
 }
 
-/** Bounding rectangle (viewport coords) for the character range [start,end). */
-export function rectForRange(container: HTMLElement, start: number, end: number): DOMRect | null {
+function rangeFor(container: HTMLElement, start: number, end: number): Range | null {
   const a = locate(container, start);
   const b = locate(container, end);
   if (!a || !b) return null;
   const range = document.createRange();
   range.setStart(a.node, a.offset);
   range.setEnd(b.node, b.offset);
-  return range.getBoundingClientRect();
+  return range;
+}
+
+/** Bounding rectangle (viewport coords) for the character range [start,end). */
+export function rectForRange(container: HTMLElement, start: number, end: number): DOMRect | null {
+  return rangeFor(container, start, end)?.getBoundingClientRect() ?? null;
+}
+
+/** Per-line rectangles (viewport coords) for [start,end) — one box per visual
+ *  line, so a multi-line span can be highlighted without overshooting. */
+export function rectsForRange(container: HTMLElement, start: number, end: number): DOMRect[] {
+  const range = rangeFor(container, start, end);
+  return range ? Array.from(range.getClientRects()) : [];
 }

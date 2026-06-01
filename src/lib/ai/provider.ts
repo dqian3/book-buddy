@@ -32,6 +32,11 @@ export interface ChatRequest {
   onToken?: (delta: string) => void;
 }
 
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface ChatResult {
   /** Full assistant text emitted in this turn (concatenated text parts). */
   text: string;
@@ -39,6 +44,8 @@ export interface ChatResult {
   toolCalls: ToolCall[];
   /** True if the model stopped to wait for tool results. */
   needsTools: boolean;
+  /** Token counts reported by the API, when available. */
+  usage?: TokenUsage;
 }
 
 export interface AIProvider {

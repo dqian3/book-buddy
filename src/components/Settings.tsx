@@ -2,9 +2,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import * as RadixSwitch from "@radix-ui/react-switch";
 import { useReader } from "../state/reader";
 import { useSettings, DEFAULT_MODELS, type ProviderId } from "../state/settings";
-import { tts } from "../lib/tts/speech";
+import { useUsage } from "../state/usage";
+import { tts, OPENAI_VOICES, OPENAI_TTS_MODELS } from "../lib/tts/speech";
+import { chatCost, ttsCost, formatUSD } from "../lib/ai/pricing";
+import { ttsCacheStats, ttsCacheClear } from "../lib/storage/db";
 import { languageName, USER_LANGUAGE } from "../lib/ai/prompts";
 import { Panel } from "./common/ui";
+
+type Tab = "general" | "advanced";
 
 const PROVIDERS: { id: ProviderId | ""; label: string }[] = [
   { id: "", label: "None" },
@@ -18,6 +23,7 @@ export function Settings() {
   const open = panel === "settings";
   const s = useSettings();
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [tab, setTab] = useState<Tab>("general");
   const bookLang = book ? languageName(book.language) : "Book language";
 
   useEffect(() => {
@@ -26,6 +32,14 @@ export function Settings() {
 
   return (
     <Panel open={open} onClose={() => setPanel(null)} title="Settings">
+      <div className="mb-5">
+        <Segmented value={tab} options={[["general", "General"], ["advanced", "Advanced"]]} onChange={(v) => setTab(v as Tab)} />
+      </div>
+
+      {tab === "advanced" ? (
+        <AdvancedTab />
+      ) : (
+      <>
       <Section title="Reading">
         <Row label="Theme">
           <Segmented
@@ -45,25 +59,56 @@ export function Settings() {
         </Row>
       </Section>
 
-      <Section title="Read aloud (free, in-browser)">
+      <Section title="Read aloud">
+        <Row label="Engine">
+          <Segmented
+            value={s.ttsEngine}
+            options={[["browser", "Browser (free)"], ["openai", "OpenAI (natural)"]]}
+            onChange={(v) => s.update({ ttsEngine: v as typeof s.ttsEngine })}
+          />
+        </Row>
         <Row label={`Speed (${s.ttsRate.toFixed(2)}×)`}>
           <input type="range" min={0.5} max={1.6} step={0.05} value={s.ttsRate} onChange={(e) => s.update({ ttsRate: Number(e.target.value) })} className="w-40" />
         </Row>
-        <Row label="Voice">
-          <select
-            value={s.ttsVoiceURI ?? ""}
-            onChange={(e) => s.update({ ttsVoiceURI: e.target.value || null })}
-            className="max-w-[12rem] rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-800"
-          >
-            <option value="">Auto (match book)</option>
-            {voices.map((v) => (
-              <option key={v.voiceURI} value={v.voiceURI}>
-                {v.name} ({v.lang})
-              </option>
-            ))}
-          </select>
-        </Row>
-        {voices.length === 0 && <p className="text-xs text-slate-400">No voices detected yet. On some systems they load after first use.</p>}
+
+        {s.ttsEngine === "browser" ? (
+          <>
+            <Row label="Voice">
+              <select
+                value={s.ttsVoiceURI ?? ""}
+                onChange={(e) => s.update({ ttsVoiceURI: e.target.value || null })}
+                className="max-w-[12rem] rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-800"
+              >
+                <option value="">Auto (best for book)</option>
+                {voices.map((v) => (
+                  <option key={v.voiceURI} value={v.voiceURI}>
+                    {v.name} ({v.lang})
+                  </option>
+                ))}
+              </select>
+            </Row>
+            {voices.length === 0 && <p className="text-xs text-slate-400">No voices detected yet. On some systems they load after first use.</p>}
+          </>
+        ) : (
+          <>
+            <Row label="Voice">
+              <select
+                value={s.ttsOpenAIVoice}
+                onChange={(e) => s.update({ ttsOpenAIVoice: e.target.value })}
+                className="max-w-[12rem] rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-800"
+              >
+                {OPENAI_VOICES.map((v) => (
+                  <option key={v} value={v}>{v}</option>
+                ))}
+              </select>
+            </Row>
+            <p className="text-xs text-slate-400">
+              {s.providerConfig.openai.apiKey
+                ? "Uses your OpenAI key (set under AI assistant). Sounds far more natural, but each play costs a small amount."
+                : "Add your OpenAI API key under AI assistant below to use this. Sounds far more natural, but each play costs a small amount."}
+            </p>
+          </>
+        )}
       </Section>
 
       <Section title="AI assistant">
@@ -128,7 +173,93 @@ export function Settings() {
           <p className="mt-1 text-xs text-slate-400">Placeholders: {"{book} {author} {language}"}. The explain-language and spoiler rules are added automatically.</p>
         </div>
       </Section>
+      </>
+      )}
     </Panel>
+  );
+}
+
+function AdvancedTab() {
+  const s = useSettings();
+  const entries = useUsage((u) => u.entries);
+  const resetUsage = useUsage((u) => u.reset);
+  const [cache, setCache] = useState<{ count: number; bytes: number }>({ count: 0, bytes: 0 });
+
+  const refreshCache = () => ttsCacheStats().then(setCache);
+  useEffect(() => { refreshCache(); }, []);
+
+  const rows = Object.values(entries);
+  const total = rows.reduce((sum, e) => {
+    const c = e.kind === "tts" ? ttsCost(e.model, e.chars) : chatCost(e.model, e.inputTokens, e.outputTokens);
+    return sum + (c ?? 0);
+  }, 0);
+  const anyUnpriced = rows.some(
+    (e) => (e.kind === "tts" ? ttsCost(e.model, e.chars) : chatCost(e.model, e.inputTokens, e.outputTokens)) == null
+  );
+
+  return (
+    <>
+      <Section title="OpenAI speech model">
+        <Row label="Model">
+          <select
+            value={s.ttsOpenAIModel}
+            onChange={(e) => s.update({ ttsOpenAIModel: e.target.value })}
+            className="max-w-[12rem] rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-600 dark:bg-slate-800"
+          >
+            {OPENAI_TTS_MODELS.map((m) => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+        </Row>
+        <p className="text-xs text-slate-400">gpt-4o-mini-tts is the cheapest and most natural; tts-1-hd is higher fidelity at ~2× the cost. Used only when the speech engine is set to OpenAI.</p>
+      </Section>
+
+      <Section title="Spoken audio cache">
+        <Row label="Cached clips">
+          <span className="text-sm text-slate-600 dark:text-slate-300">
+            {cache.count} · {(cache.bytes / 1_048_576).toFixed(1)} MB
+          </span>
+        </Row>
+        <button
+          onClick={() => ttsCacheClear().then(refreshCache)}
+          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+        >
+          Clear audio cache
+        </button>
+        <p className="text-xs text-slate-400">OpenAI speech is cached in this browser, so re-reading a passage replays for free instead of being billed again.</p>
+      </Section>
+
+      <Section title="Usage & estimated cost">
+        {rows.length === 0 ? (
+          <p className="text-sm text-slate-500 dark:text-slate-400">No API usage recorded yet.</p>
+        ) : (
+          <>
+            <div className="space-y-1.5">
+              {rows.map((e) => {
+                const cost = e.kind === "tts" ? ttsCost(e.model, e.chars) : chatCost(e.model, e.inputTokens, e.outputTokens);
+                const detail =
+                  e.kind === "tts"
+                    ? `${e.chars.toLocaleString()} chars`
+                    : `${e.inputTokens.toLocaleString()} in · ${e.outputTokens.toLocaleString()} out`;
+                return (
+                  <div key={`${e.provider}:${e.model}`} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="min-w-0 truncate text-slate-700 dark:text-slate-200">{e.model}</span>
+                    <span className="shrink-0 text-xs text-slate-400">{e.calls}× · {detail}</span>
+                    <span className="w-20 shrink-0 text-right tabular-nums text-slate-600 dark:text-slate-300">{cost == null ? "—" : formatUSD(cost)}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-2 flex items-baseline justify-between border-t border-slate-200 pt-2 text-sm font-medium dark:border-slate-700">
+              <span className="text-slate-700 dark:text-slate-200">Estimated total</span>
+              <span className="tabular-nums text-slate-800 dark:text-slate-100">{formatUSD(total)}{anyUnpriced ? "+" : ""}</span>
+            </div>
+            <button onClick={resetUsage} className="mt-1 text-xs text-sky-600 hover:underline">Reset usage</button>
+          </>
+        )}
+        <p className="text-xs text-slate-400">Token counts are exact (reported by the API); dollar figures are estimates from list prices and may be out of date. Local (Ollama) and browser speech are free.</p>
+      </Section>
+    </>
   );
 }
 

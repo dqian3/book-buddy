@@ -1,9 +1,9 @@
 import { useReader } from "../state/reader";
-import { useSettings } from "../state/settings";
-import { tts, ttsLangFor } from "../lib/tts/speech";
+import { speakSelection } from "../lib/tts/readAloud";
 import { IconSparkles, IconSpeaker, IconBookOpen, IconClose } from "./Icons";
 
-// Floating actions for a highlighted passage: explain, translate, or read aloud.
+// Floating actions for a highlighted passage. Explain/translate submit to the
+// assistant immediately so the user doesn't have to confirm a second time.
 export function SelectionBar() {
   const selection = useReader((s) => s.selection);
   const book = useReader((s) => s.book);
@@ -14,15 +14,22 @@ export function SelectionBar() {
   const text = selection.text;
   const short = text.length > 36 ? text.slice(0, 36) + "…" : text;
 
-  const explain = () => openChatWith(`Please explain this passage and any tricky words in it:\n「${text}」`);
-  const translate = () => openChatWith(`Translate this passage and note any nuance:\n「${text}」`);
-  const read = () => {
+  const dismiss = () => {
     setSelection(null);
-    tts.speak([{ id: "sel", text }], {
-      lang: ttsLangFor(book.language),
-      rate: useSettings.getState().ttsRate,
-      voiceURI: useSettings.getState().ttsVoiceURI,
-    });
+    window.getSelection()?.removeAllRanges();
+  };
+
+  const explain = () => {
+    openChatWith(`Please explain this passage and any tricky words in it:\n「${text}」`, { autoSubmit: true });
+    dismiss();
+  };
+  const translate = () => {
+    openChatWith(`Translate this passage and note any nuance:\n「${text}」`, { autoSubmit: true });
+    dismiss();
+  };
+  const read = () => {
+    speakSelection(selection);
+    dismiss();
   };
 
   return (
@@ -32,7 +39,7 @@ export function SelectionBar() {
         <Action onClick={explain} icon={<IconSparkles className="h-4 w-4" />} label="Explain" />
         <Action onClick={translate} icon={<IconBookOpen className="h-4 w-4" />} label="Translate" />
         <Action onClick={read} icon={<IconSpeaker className="h-4 w-4" />} label="Read" />
-        <button onClick={() => setSelection(null)} aria-label="Dismiss" className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
+        <button onClick={dismiss} aria-label="Dismiss" className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
           <IconClose className="h-4 w-4" />
         </button>
       </div>

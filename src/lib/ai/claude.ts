@@ -65,6 +65,8 @@ export function createClaudeProvider(cfg: { apiKey: string; model: string }): AI
       const toolCalls: ToolCall[] = [];
       let text = "";
       let needsTools = false;
+      let inputTokens = 0;
+      let outputTokens = 0;
 
       for await (const line of readLines(res)) {
         if (!line.startsWith("data:")) continue;
@@ -76,7 +78,10 @@ export function createClaudeProvider(cfg: { apiKey: string; model: string }): AI
         } catch {
           continue;
         }
-        if (evt.type === "content_block_start") {
+        if (evt.type === "message_start") {
+          // input_tokens here count the (cached) prompt; output grows as we stream.
+          inputTokens = evt.message?.usage?.input_tokens ?? 0;
+        } else if (evt.type === "content_block_start") {
           const cb = evt.content_block;
           if (cb?.type === "text") blocks.set(evt.index, { kind: "text" });
           else if (cb?.type === "tool_use")
@@ -103,12 +108,18 @@ export function createClaudeProvider(cfg: { apiKey: string; model: string }): AI
           }
         } else if (evt.type === "message_delta") {
           if (evt.delta?.stop_reason === "tool_use") needsTools = true;
+          if (evt.usage?.output_tokens) outputTokens = evt.usage.output_tokens;
         } else if (evt.type === "error") {
           throw new Error(evt.error?.message || "Claude stream error");
         }
       }
 
-      return { text, toolCalls, needsTools: needsTools && toolCalls.length > 0 };
+      return {
+        text,
+        toolCalls,
+        needsTools: needsTools && toolCalls.length > 0,
+        usage: { inputTokens, outputTokens },
+      };
     },
   };
 }

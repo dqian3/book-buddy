@@ -4,6 +4,7 @@ import { DEFAULT_SYSTEM_TEMPLATE, type ExplainIn } from "../lib/ai/prompts";
 
 export type ProviderId = "claude" | "openai" | "ollama";
 export type ThemePref = "light" | "dark" | "system";
+export type TtsEngine = "browser" | "openai";
 
 export interface ProviderConfig {
   claude: { apiKey: string; model: string };
@@ -25,8 +26,11 @@ export interface SettingsState {
   hoverTranslate: boolean;
 
   // TTS
+  ttsEngine: TtsEngine;
   ttsRate: number;
   ttsVoiceURI: string | null;
+  ttsOpenAIVoice: string;
+  ttsOpenAIModel: string;
 
   // AI
   spoilerFree: boolean;
@@ -50,8 +54,11 @@ export const useSettings = create<SettingsState>()(
       showPinyin: true,
       hoverTranslate: false,
 
+      ttsEngine: "browser",
       ttsRate: 1,
       ttsVoiceURI: null,
+      ttsOpenAIVoice: "alloy",
+      ttsOpenAIModel: "gpt-4o-mini-tts",
 
       spoilerFree: true,
       provider: "",

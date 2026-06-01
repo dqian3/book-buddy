@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useReader } from "../state/reader";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
-import { tts, ttsLangFor } from "../lib/tts/speech";
+import { tts, speakOptionsFor } from "../lib/tts/speech";
 import { Panel } from "./common/ui";
 import { IconSpeaker, IconTrash } from "./Icons";
 
@@ -43,7 +43,7 @@ export function VocabPanel() {
                 </div>
                 <div className="flex gap-1">
                   <button
-                    onClick={() => tts.speak([{ id: "w", text: v.word }], { lang: ttsLangFor(book.language), rate: 0.9, voiceURI: useSettings.getState().ttsVoiceURI })}
+                    onClick={() => tts.speak([{ id: "w", text: v.word }], { ...speakOptionsFor(book.language, useSettings.getState()), rate: 0.9 })}
                     aria-label="Read aloud"
                     className="rounded p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700"
                   >

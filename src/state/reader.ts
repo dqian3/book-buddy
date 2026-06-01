@@ -18,6 +18,16 @@ export interface ActiveLookup {
 export interface ActiveSelection {
   text: string;
   sectionIndex: number;
+  /** Where the selection starts, so read-aloud can place the word cursor. */
+  blockIndex: number;
+  start: number;
+}
+
+/** The word currently being spoken, as a char range within its block. */
+export interface TtsWord {
+  blockId: string;
+  start: number;
+  end: number;
 }
 
 export type Panel = "toc" | "settings" | "bookmarks" | "vocab" | "chat" | "library";
@@ -36,9 +46,11 @@ interface ReaderState {
   selection: ActiveSelection | null;
   ttsBlockId: string | null;
   ttsPlaying: boolean;
+  ttsPaused: boolean;
+  ttsWord: TtsWord | null;
   panel: Panel | null;
-  /** Prefill text for the chat composer (e.g. from a quick action). */
-  chatPrefill: string | null;
+  /** Prefill (or auto-submit) for the chat composer from a quick action. */
+  chatPrefill: { text: string; autoSubmit?: boolean } | null;
 
   open: (bookId: string) => Promise<void>;
   close: () => void;
@@ -47,9 +59,11 @@ interface ReaderState {
   setActive: (a: ActiveLookup | null) => void;
   setSelection: (s: ActiveSelection | null) => void;
   setTts: (blockId: string | null, playing: boolean) => void;
+  setTtsPaused: (paused: boolean) => void;
+  setTtsWord: (word: TtsWord | null) => void;
   setPanel: (p: Panel | null) => void;
-  openChatWith: (prefill: string) => void;
-  consumeChatPrefill: () => string | null;
+  openChatWith: (text: string, options?: { autoSubmit?: boolean }) => void;
+  consumeChatPrefill: () => { text: string; autoSubmit?: boolean } | null;
 }
 
 export const useReader = create<ReaderState>((set, get) => ({
@@ -63,6 +77,8 @@ export const useReader = create<ReaderState>((set, get) => ({
   selection: null,
   ttsBlockId: null,
   ttsPlaying: false,
+  ttsPaused: false,
+  ttsWord: null,
   panel: null,
   chatPrefill: null,
 
@@ -103,8 +119,11 @@ export const useReader = create<ReaderState>((set, get) => ({
   setActive: (a) => set({ active: a }),
   setSelection: (s) => set({ selection: s }),
   setTts: (blockId, playing) => set({ ttsBlockId: blockId, ttsPlaying: playing }),
+  setTtsPaused: (paused) => set({ ttsPaused: paused }),
+  setTtsWord: (word) => set({ ttsWord: word }),
   setPanel: (p) => set({ panel: p }),
-  openChatWith: (prefill) => set({ chatPrefill: prefill, panel: "chat", active: null }),
+  openChatWith: (text, options) =>
+    set({ chatPrefill: { text, autoSubmit: options?.autoSubmit }, panel: "chat", active: null }),
   consumeChatPrefill: () => {
     const v = get().chatPrefill;
     if (v !== null) set({ chatPrefill: null });

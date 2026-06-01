@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Block, Position } from "../lib/book/model";
 import { isTextBlock } from "../lib/book/model";
+import type { DictEntry } from "../lib/dictionary/types";
 import type { TokenizeResult } from "../lib/tokenizer/types";
 import { assetUrl } from "../lib/book/loader";
-import { charIndexFromPoint, rectForRange } from "../lib/dom/caret";
+import { charIndexFromPoint, charIndexOfNode, rectForRange, rectsForRange } from "../lib/dom/caret";
 import { sentenceAround } from "../lib/text";
-import { tts } from "../lib/tts/speech";
+import { stopReadAloud } from "../lib/tts/readAloud";
 import { useReader, type ActiveLookup } from "../state/reader";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
@@ -29,7 +30,6 @@ export function Reader() {
   // the reader and rebuild every block.
   const fontScale = useSettings((s) => s.fontScale);
   const hoverTranslate = useSettings((s) => s.hoverTranslate);
-  const showPinyin = useSettings((s) => s.showPinyin);
   const setProgress = useLibrary((s) => s.setProgress);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -77,7 +77,7 @@ export function Reader() {
       const entries = services.dictionary?.lookup(token.word) ?? [];
       const rect = rectForRange(target, token.start, token.end);
       if (entries.length === 0 || !rect) return setHover(null);
-      setHover({ word: token.word, pinyin: entries[0].pinyin, defs: entries[0].defs, rect });
+      setHover({ word: token.word, entries, rect });
     },
     [hoverTranslate, services, section]
   );
@@ -160,16 +160,41 @@ export function Reader() {
   // --- Selection -----------------------------------------------------------
   const onSelectionEnd = useCallback(() => {
     const sel = window.getSelection();
-    const text = sel?.toString().trim() ?? "";
-    if (text.length > 1 && scrollRef.current?.contains(sel!.anchorNode)) {
-      useReader.getState().setSelection({ text, sectionIndex });
+    const raw = sel?.toString() ?? "";
+    const text = raw.trim();
+    if (text.length > 1 && sel && scrollRef.current?.contains(sel.anchorNode)) {
+      // A highlight supersedes any open word popup — clear it for good so it
+      // doesn't reappear when the highlight is later dismissed.
+      useReader.getState().setActive(null);
+      // Record where the selection starts so read-aloud can anchor its cursor.
+      const range = sel.getRangeAt(0);
+      const startNode = range.startContainer;
+      const startEl = (startNode.nodeType === Node.TEXT_NODE ? startNode.parentElement : (startNode as HTMLElement))
+        ?.closest<HTMLElement>("[data-block-index]");
+      const blockIndex = startEl ? Number(startEl.dataset.blockIndex) : 0;
+      const offset = startEl ? charIndexOfNode(startEl, range.startContainer, range.startOffset) ?? 0 : 0;
+      const start = offset + (raw.length - raw.trimStart().length); // skip trimmed leading space
+      useReader.getState().setSelection({ text, sectionIndex, blockIndex, start });
     } else {
       useReader.getState().setSelection(null);
     }
   }, [sectionIndex]);
 
-  // Stop speech when leaving the section/book.
-  useEffect(() => () => tts.stop(), [sectionIndex]);
+  // Stop reading when leaving the section/book.
+  useEffect(() => () => stopReadAloud(), [sectionIndex]);
+
+  // Keep the block being read aloud in view.
+  useEffect(() => {
+    if (!ttsBlockId) return;
+    const el = blockEls.current.get(ttsBlockId);
+    const c = scrollRef.current;
+    if (!el || !c) return;
+    const er = el.getBoundingClientRect();
+    const cr = c.getBoundingClientRect();
+    if (er.top < cr.top + 48 || er.bottom > cr.bottom - 48) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+  }, [ttsBlockId]);
 
   // --- Resume / jump scrolling --------------------------------------------
   useLayoutEffect(() => {
@@ -257,13 +282,14 @@ export function Reader() {
     <div className="relative flex h-full flex-col">
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto overscroll-contain"
+        className="relative flex-1 overflow-y-auto overscroll-contain"
         onClick={onClick}
         onMouseUp={onSelectionEnd}
         onTouchEnd={onSelectionEnd}
         onMouseMove={onMouseMove}
         onMouseLeave={clearHover}
       >
+        <TtsCursor blockEls={blockEls} scrollRef={scrollRef} />
         <article
           data-testid="reader"
           className="mx-auto max-w-2xl px-5 py-6 font-reading text-slate-800 dark:text-slate-200"
@@ -293,8 +319,31 @@ export function Reader() {
         </article>
       </div>
 
-      {active && <DictPopup active={active} onPickToken={onPickToken} onClose={() => setActive(null)} />}
-      {hover && !active && hoverTranslate && <HoverTooltip info={hover} showPinyin={showPinyin} />}
+      {(() => {
+        // Render exactly one popup instance — when the user clicks a hovered
+        // word, the same DOM node persists so its position is stable.
+        const props = active
+          ? {
+              word: active.token.word,
+              entries: active.entries,
+              alternatives: active.token.alternatives,
+              rect: active.rect,
+              persistent: true as const,
+              onPickToken,
+              sentence: active.sentence,
+              position: active.position,
+            }
+          : hover && hoverTranslate
+            ? {
+                word: hover.word,
+                entries: hover.entries,
+                alternatives: [],
+                rect: hover.rect,
+                persistent: false as const,
+              }
+            : null;
+        return props && <DictPopup {...props} />;
+      })()}
       <SelectionBar />
     </div>
   );
@@ -363,6 +412,46 @@ function BlockView({
   );
 }
 
+/** Translucent highlight over the word currently being read aloud. Positioned
+ *  in the scroll container's content space so it scrolls along with the text,
+ *  and isolated in its own component so per-word updates don't re-render the
+ *  whole section. */
+function TtsCursor({
+  blockEls,
+  scrollRef,
+}: {
+  blockEls: React.MutableRefObject<Map<string, HTMLElement>>;
+  scrollRef: React.RefObject<HTMLDivElement>;
+}) {
+  const word = useReader((s) => s.ttsWord);
+  const [boxes, setBoxes] = useState<{ top: number; left: number; width: number; height: number }[]>([]);
+
+  useLayoutEffect(() => {
+    const el = word ? blockEls.current.get(word.blockId) : null;
+    const c = scrollRef.current;
+    if (!word || !el || !c) return setBoxes([]);
+    // One box per visual line, so a sentence-length highlight (OpenAI engine)
+    // wraps cleanly instead of drawing one overshooting rectangle.
+    const rects = rectsForRange(el, word.start, word.end).filter((r) => r.width > 0);
+    const cr = c.getBoundingClientRect();
+    setBoxes(rects.map((r) => ({ top: r.top - cr.top + c.scrollTop, left: r.left - cr.left + c.scrollLeft, width: r.width, height: r.height })));
+  }, [word, blockEls, scrollRef]);
+
+  if (!boxes.length) return null;
+  return (
+    <>
+      {boxes.map((box, i) => (
+        <div
+          key={i}
+          aria-hidden
+          className="pointer-events-none absolute rounded bg-amber-300/40 transition-all duration-100 ease-out dark:bg-amber-400/30"
+          style={box}
+        />
+      ))}
+    </>
+  );
+}
+
 /** Render text with the active word wrapped in a highlight span. */
 function highlightActive(text: string, active: ActiveLookup) {
   const { start, end } = active.token;
@@ -377,47 +466,9 @@ function highlightActive(text: string, active: ActiveLookup) {
 
 interface HoverInfo {
   word: string;
-  pinyin?: string;
-  defs: string[];
+  entries: DictEntry[];
   /** Anchor rect (viewport coords) of the hovered word. */
   rect: DOMRect;
-}
-
-/** A small, non-interactive translation tooltip shown while hovering a word. */
-function HoverTooltip({ info, showPinyin }: { info: HoverInfo; showPinyin: boolean }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    const { rect } = info;
-    const left = Math.min(Math.max(8, rect.left + rect.width / 2 - w / 2), window.innerWidth - w - 8);
-    const above = rect.top - h - 8 >= 8;
-    const top = above ? rect.top - h - 8 : Math.min(rect.bottom + 8, window.innerHeight - h - 8);
-    setPos({ left, top });
-  }, [info]);
-
-  return (
-    <div
-      ref={ref}
-      data-testid="hover-tooltip"
-      style={{ left: pos?.left ?? -9999, top: pos?.top ?? -9999, visibility: pos ? "visible" : "hidden" }}
-      className="pointer-events-none fixed z-30 max-w-[18rem] rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-xl dark:border-slate-700 dark:bg-slate-800"
-    >
-      <div className="flex items-baseline gap-2">
-        <span className="font-reading text-base leading-tight text-slate-900 dark:text-slate-100">{info.word}</span>
-        {showPinyin && info.pinyin && <span className="text-xs text-sky-700 dark:text-sky-300">{info.pinyin}</span>}
-      </div>
-      {info.defs.length > 0 && (
-        <div className="mt-0.5 text-xs leading-snug text-slate-600 dark:text-slate-300">
-          {info.defs.join("; ")}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function SectionNav({

@@ -61,6 +61,7 @@ export function createOpenAIProvider(cfg: { apiKey: string; model: string; baseU
         body: JSON.stringify({
           model: cfg.model,
           stream: true,
+          stream_options: { include_usage: true }, // final chunk carries token usage
           messages: apiMessages,
           ...(tools && tools.length
             ? {
@@ -79,6 +80,8 @@ export function createOpenAIProvider(cfg: { apiKey: string; model: string; baseU
       const pending = new Map<number, { id: string; name: string; argBuf: string }>();
       let text = "";
       let finish: string | null = null;
+      let inputTokens = 0;
+      let outputTokens = 0;
 
       for await (const line of readLines(res)) {
         if (!line.startsWith("data:")) continue;
@@ -89,6 +92,10 @@ export function createOpenAIProvider(cfg: { apiKey: string; model: string; baseU
           evt = JSON.parse(payload);
         } catch {
           continue;
+        }
+        if (evt.usage) {
+          inputTokens = evt.usage.prompt_tokens ?? inputTokens;
+          outputTokens = evt.usage.completion_tokens ?? outputTokens;
         }
         const choice = evt.choices?.[0];
         if (!choice) continue;
@@ -122,7 +129,12 @@ export function createOpenAIProvider(cfg: { apiKey: string; model: string; baseU
           return { id: s.id || `call_${s.name}_${Math.random().toString(36).slice(2, 8)}`, name: s.name, input };
         });
 
-      return { text, toolCalls, needsTools: finish === "tool_calls" && toolCalls.length > 0 };
+      return {
+        text,
+        toolCalls,
+        needsTools: finish === "tool_calls" && toolCalls.length > 0,
+        usage: { inputTokens, outputTokens },
+      };
     },
   };
 }

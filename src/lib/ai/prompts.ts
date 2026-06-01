@@ -26,6 +26,10 @@ export interface BuildSystemArgs {
   tone?: string;
   /** Human-readable current location, e.g. "第一回 风雪惊变". */
   locationLabel?: string;
+  /** The paragraph/line the reader is currently on, included as context so
+   *  short questions like "what does X mean" can be answered without the
+   *  user having to highlight the surrounding sentence. */
+  currentParagraph?: string;
   /** When true, restrict the agent to what the reader has already read. */
   spoilerFree: boolean;
 }
@@ -66,6 +70,7 @@ export function buildSystemPrompt({
   explainIn,
   tone,
   locationLabel,
+  currentParagraph,
   spoilerFree,
 }: BuildSystemArgs): string {
   const lang = languageName(book.language);
@@ -77,9 +82,15 @@ export function buildSystemPrompt({
   const parts: string[] = [filled, "", explanationDirective(explainIn, book.language)];
   if (tone?.trim()) parts.push("", `Style/level preference: ${tone.trim()}`);
 
+  parts.push("", `Reader's current location: ${locationLabel || "the beginning"}.`);
+  if (currentParagraph?.trim()) {
+    parts.push(
+      "",
+      `Reader's current paragraph (treat this as the default context for any word, phrase, or pronoun they ask about — no need to call search_book just for this):\n「${currentParagraph.trim()}」`
+    );
+  }
+
   parts.push(
-    "",
-    `Reader's current location: ${locationLabel || "the beginning"}.`,
     "",
     "You have a `search_book` tool that returns passages from the book. Use it whenever your answer depends on the text — to find a scene, look up a word in context, check a name, recall what just happened, etc. Prefer queries written in the book's original language. You can call it multiple times if the first results aren't enough. If a question doesn't need the book (e.g. a general grammar question), just answer."
   );

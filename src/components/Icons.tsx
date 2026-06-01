@@ -36,6 +36,12 @@ export const IconSpeaker = ({ className }: P) => (
 export const IconStop = ({ className }: P) => (
   <svg {...base(className)}><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
 );
+export const IconPlay = ({ className }: P) => (
+  <svg {...base(className)} fill="currentColor"><polygon points="6 4 20 12 6 20 6 4" /></svg>
+);
+export const IconPause = ({ className }: P) => (
+  <svg {...base(className)} fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1" /><rect x="14" y="5" width="4" height="14" rx="1" /></svg>
+);
 export const IconList = ({ className }: P) => (
   <svg {...base(className)}><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>
 );

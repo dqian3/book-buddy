@@ -1,12 +1,12 @@
 import { useReader, type Panel } from "../state/reader";
-import { tts } from "../lib/tts/speech";
+import { startReadThrough, pauseReadAloud, resumeReadAloud, stopReadAloud } from "../lib/tts/readAloud";
 import { IconButton } from "./common/ui";
-import { IconBook, IconList, IconBookmark, IconSparkles, IconGear, IconStop, IconBookOpen } from "./Icons";
+import { IconBook, IconList, IconBookmark, IconSparkles, IconGear, IconStop, IconBookOpen, IconPlay, IconPause, IconSpeaker } from "./Icons";
 
 export function TopBar() {
   const { book, sectionIndex, setPanel, close, panel } = useReader();
   const ttsPlaying = useReader((s) => s.ttsPlaying);
-  const setTts = useReader((s) => s.setTts);
+  const ttsPaused = useReader((s) => s.ttsPaused);
   const section = book?.sections[sectionIndex];
   // Every toolbar button toggles its panel: clicking it again collapses it.
   const toggle = (p: Panel) => setPanel(panel === p ? null : p);
@@ -30,9 +30,22 @@ export function TopBar() {
         </span>
       </button>
 
-      {ttsPlaying && (
-        <IconButton onClick={() => { tts.stop(); setTts(null, false); }} label="Stop reading" active>
-          <IconStop className="h-5 w-5" />
+      {ttsPlaying ? (
+        <>
+          <IconButton
+            onClick={() => (ttsPaused ? resumeReadAloud() : pauseReadAloud())}
+            label={ttsPaused ? "Resume reading" : "Pause reading"}
+            active
+          >
+            {ttsPaused ? <IconPlay className="h-5 w-5" /> : <IconPause className="h-5 w-5" />}
+          </IconButton>
+          <IconButton onClick={stopReadAloud} label="Stop reading">
+            <IconStop className="h-5 w-5" />
+          </IconButton>
+        </>
+      ) : (
+        <IconButton onClick={() => startReadThrough()} label="Read aloud from here">
+          <IconSpeaker className="h-5 w-5" />
         </IconButton>
       )}
       <IconButton onClick={() => toggle("toc")} label="Contents" active={panel === "toc"}>
