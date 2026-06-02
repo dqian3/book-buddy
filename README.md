@@ -1,3 +1,6 @@
+Note: this is one of my first projects that I've let coding agents plan and execute
+almost entirely on their own. Your mileage may vary with how easy it is to work with.. 
+
 # Babel Book Buddy
 
 A mobile/tablet-friendly reading companion for books in a foreign or archaic

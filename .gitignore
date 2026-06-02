@@ -8,5 +8,6 @@ dist/
 # particular shouldn't live in git.
 public/data/dict/
 public/data/books/
+books
 
 .env

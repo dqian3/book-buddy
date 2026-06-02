@@ -20,7 +20,7 @@ export function SelectionBar() {
   };
 
   const explain = () => {
-    openChatWith("Explain this passage and any tricky words in it.", { autoSubmit: true, newChat: true, passage: text });
+    openChatWith(text, { autoSubmit: true, newChat: true, passage: text });
     dismiss();
   };
   const read = () => {
