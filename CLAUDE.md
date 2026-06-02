@@ -53,7 +53,17 @@ reader/TTS/retrieval code never knows whether a book came from EPUB, PDF, or TXT
   adapter, normalizes to the document model, builds retrieval chunks
   (`extract/common.mjs`), copies image assets, and writes
   `public/data/books/<id>/{book.json,chunks.json,assets/}` plus an entry in
-  `public/data/books/index.json` (the library list).
+  `public/data/books/index.json` (the library list). The format adapters stay
+  format-only: any language- or book-specific extraction quirk (chapter detection,
+  heading cleanup) lives in `scripts/profiles/` instead.
+- `scripts/profiles/` — **hierarchical extraction profiles**, resolved
+  `base ← lang/<code> ← book/<name>` (`resolveProfile` in `profiles/index.mjs`). A
+  profile is a small bag of hooks (`isChapterHeading`, `splitGluedHeading`,
+  `cleanHeading`) the epub/html adapters call at language/book decision points. The
+  language layer is picked from `--lang`; an optional `--profile <name>` adds one
+  book's quirks (e.g. `book/shediao.mjs` strips a stray anchor from titles). **This is
+  the seam for per-language chapter conventions and per-book export quirks** — add a
+  `lang/<code>.mjs` or `book/<name>.mjs` instead of editing a format adapter.
 - `scripts/lang/<code>/` — **language-specific** build steps. So far only
   `scripts/lang/zh/build-dict.mjs`, which downloads CC-CEDICT and emits a compact
   `{maxLen, entries, trad}` index (pinyin stays numeric, rendered to tone marks at

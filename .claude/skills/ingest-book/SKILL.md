@@ -33,6 +33,11 @@ the app then loads. Adding a book = running the ingestion CLI.
      title. **Re-ingesting with the same `--id` overwrites that book** (and its index
      entry) — use this to update a book.
    - `--title` / `--author` default to the filename / empty.
+   - `--profile <name>` (optional) applies a book-specific extraction profile from
+     `scripts/profiles/book/<name>.mjs` for export quirks one book has (e.g. `shediao`
+     strips a stray anchor placeholder from chapter titles). Language-level chapter
+     detection comes from `--lang` automatically and needs no profile. See
+     `scripts/profiles/` (base ← language ← book).
 
 2. **Confirm the output.** Success prints a summary and the path. Files land in
    `public/data/books/<id>/` (`book.json`, `chunks.json`, `assets/`) and the book is
@@ -53,7 +58,7 @@ the app then loads. Adding a book = running the ingestion CLI.
 
 ```bash
 # Rebuild the bundled sample (what `npm run seed` does after build:dict:zh):
-node scripts/ingest.mjs "books/射雕英雄传-金庸-converted.html" --lang zh --id shediao --title "射雕英雄传" --author "金庸"
+node scripts/ingest.mjs "books/射雕英雄传-金庸-converted.html" --lang zh --profile shediao --id shediao --title "射雕英雄传" --author "金庸"
 
 # English EPUB:
 node scripts/ingest.mjs path/to/hamlet.epub --lang en --title "Hamlet" --author "Shakespeare"

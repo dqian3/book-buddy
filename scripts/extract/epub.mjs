@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { unzipSync, strFromU8 } from "fflate";
 import * as cheerio from "cheerio";
 import { makeBuilder, finalizeSections } from "./common.mjs";
+import base from "../profiles/base.mjs";
 
 const posix = (p) => p.replace(/\\/g, "/");
 const dirname = (p) => posix(p).split("/").slice(0, -1).join("/");
@@ -21,16 +22,7 @@ const resolve = (base, rel) => {
   return out.join("/");
 };
 
-// A short, standalone paragraph that labels a chapter — "第一回：…", "Chapter IV",
-// "Capítulo primero" — acts as a section break for EPUBs that carry no <h*> tags.
-// Project Gutenberg's auto-generated books are like this: the chapter line is a
-// plain <p> and the spine splits mid-chapter, so without this 120 chapters
-// collapse into a few giant sections. The length guard keeps it off real prose.
-const CHAPTER_RE =
-  /^(第[〇○零一二三四五六七八九十百千兩两\d]+\s*[回章卷節节折齣出篇部](?:[:：、.\s]|$)|(chapter|cap[íi]tulo|canto)\b)/i;
-const isChapterHeading = (text) => !!text && text.length <= 50 && CHAPTER_RE.test(text);
-
-export async function extractEpub(filePath, { copyAssetBytes } = {}) {
+export async function extractEpub(filePath, { copyAssetBytes, profile = base } = {}) {
   const bytes = new Uint8Array(await readFile(filePath));
   const files = unzipSync(bytes);
   const get = (p) => files[p] && strFromU8(files[p]);
@@ -87,19 +79,16 @@ export async function extractEpub(filePath, { copyAssetBytes } = {}) {
         const text = $el.text().replace(/\s+/g, " ").trim();
         // A chapter-label paragraph starts a new section (titled by the label);
         // otherwise it's body text. Books with real <h*> tags never reach here
-        // for their titles, so this only kicks in for heading-less EPUBs.
-        if (isChapterHeading(text)) {
+        // for their titles, so this only kicks in for heading-less EPUBs. The
+        // profile decides what counts as a chapter label (language-specific) and
+        // how to recover a label glued onto the prior paragraph's closing line.
+        if (profile.isChapterHeading(text)) {
           b.startSection(text);
         } else {
-          // Some sources don't break the chapter label into its own <p>, gluing
-          // it onto the prior chapter's closing line ("…分解。第九十回：…"). Split
-          // it back out when a sentence end is immediately followed by a label.
-          const split = text.match(
-            /^(.*[。！？!?]\s*)(第[〇○零一二三四五六七八九十百千兩两\d]+\s*[回章卷節节折齣出篇部][:：、.\s].*)$/,
-          );
-          if (split && isChapterHeading(split[2])) {
-            b.addText("paragraph", split[1]);
-            b.startSection(split[2]);
+          const split = profile.splitGluedHeading(text);
+          if (split) {
+            b.addText("paragraph", split[0]);
+            b.startSection(split[1]);
           } else {
             b.addText("paragraph", text);
           }

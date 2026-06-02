@@ -16,6 +16,7 @@ import { extractHtml } from "./extract/html.mjs";
 import { extractEpub } from "./extract/epub.mjs";
 import { extractPdf } from "./extract/pdf.mjs";
 import { extractTxt } from "./extract/txt.mjs";
+import { resolveProfile } from "./profiles/index.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const BOOKS_DIR = join(ROOT, "public/data/books");
@@ -60,7 +61,7 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const file = args._[0];
   if (!file) {
-    console.error("Usage: node scripts/ingest.mjs <file> --lang <code> [--id slug] [--title T] [--author A]");
+    console.error("Usage: node scripts/ingest.mjs <file> --lang <code> [--id slug] [--title T] [--author A] [--profile name]");
     process.exit(1);
   }
   if (!existsSync(file)) {
@@ -73,6 +74,9 @@ async function main() {
   const title = args.title || basename(file, extname(file));
   const author = args.author || "";
   const id = args.id || slugify(title);
+  // base ← lang/<code> ← book/<profile>; supplies language- and book-specific
+  // extraction hooks (chapter detection, heading cleanup) to the format adapters.
+  const profile = await resolveProfile({ lang: language, profile: args.profile });
   const outDir = join(BOOKS_DIR, id);
   const assetsDir = join(outDir, "assets");
 
@@ -93,17 +97,19 @@ async function main() {
     return `assets/${fname}`;
   };
 
-  console.log(`Ingesting ${file} (format=${ext}, lang=${language}, id=${id})…`);
+  console.log(
+    `Ingesting ${file} (format=${ext}, lang=${language}, id=${id}${args.profile ? `, profile=${args.profile}` : ""})…`,
+  );
 
   let sections;
   switch (ext) {
     case "html":
     case "htm":
     case "xhtml":
-      sections = await extractHtml(file, { copyAsset });
+      sections = await extractHtml(file, { copyAsset, profile });
       break;
     case "epub":
-      sections = await extractEpub(file, { copyAssetBytes });
+      sections = await extractEpub(file, { copyAssetBytes, profile });
       break;
     case "pdf":
       sections = await extractPdf(file);

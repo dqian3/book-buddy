@@ -10,4 +10,9 @@ public/data/dict/
 public/data/books/
 private_books
 
+# Per-book extraction profiles cover specific (often non-public-domain) books
+# and live only on the machine that has the source; the loader treats them as
+# optional. See scripts/profiles/index.mjs.
+scripts/profiles/book/
+
 .env
