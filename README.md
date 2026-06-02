@@ -81,6 +81,33 @@ node scripts/ingest.mjs path/to/bible.txt --lang en --id kjv --title "KJV Bible"
 - Output lands in `public/data/books/<id>/`; refresh the app to see it in the
   library.
 
+### When a book doesn't import cleanly
+
+Ingestion summarizes what it produced (`N sections, N blocks`). If a book comes
+out wrong — every chapter collapsed into one giant section, stray characters in
+the chapter titles, verse run together — the source has a quirk the generic
+adapter doesn't handle. Rather than special-casing the format adapter, add an
+**extraction profile** under [`scripts/profiles/`](./scripts/profiles), resolved
+as `base ← lang/<code> ← book/<name>`:
+
+- **A whole language's chapter convention** (e.g. chapters labelled a certain way
+  in a language we don't cover yet) → add `scripts/profiles/lang/<code>.mjs`. It's
+  picked up automatically from `--lang <code>`. The existing `lang/zh.mjs`
+  (Chinese `第N回` headings) and `lang/es.mjs` (`Capítulo …`) are the templates.
+- **One specific book's export quirk** (e.g. a stray anchor character in every
+  title) → add `scripts/profiles/book/<name>.mjs` and pass `--profile <name>`:
+
+  ```bash
+  node scripts/ingest.mjs my-book.epub --lang zh --profile my-book --id my-book --title "…"
+  ```
+
+A profile is a small object of optional hooks — `isChapterHeading`,
+`splitGluedHeading`, `cleanHeading` — that the EPUB/HTML adapters call at the
+decision points; override only the one you need (see `lang/zh.mjs` for all three).
+`scripts/profiles/book/` is **gitignored** (those profiles cover specific, often
+non-public-domain books) and loaded only when `--profile` is given, so your
+private profiles stay out of the repo.
+
 ## How it fits together
 
 ```
