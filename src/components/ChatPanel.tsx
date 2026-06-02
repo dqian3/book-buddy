@@ -6,6 +6,7 @@ import { useChat } from "../state/chat";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
 import { useUsage } from "../state/usage";
+import { useDebug } from "../state/debug";
 import { createProvider, type ChatTurn, type MessagePart } from "../lib/ai";
 import { buildSystemPrompt } from "../lib/ai/prompts";
 import { ALL_TOOLS, executeTool, type ToolContext } from "../lib/ai/tools";
@@ -111,6 +112,14 @@ export function ChatPanel() {
     try {
       for (let step = 0; step < MAX_AGENT_STEPS; step++) {
         const stepStartLen = visible.length;
+        useDebug.getState().record({
+          provider: provider.id,
+          model: chatModel,
+          step,
+          system,
+          messages: [...agentMessages],
+          tools: ALL_TOOLS.map((t) => t.name),
+        });
         const result = await provider.chat({
           system,
           messages: agentMessages,

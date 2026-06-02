@@ -3,9 +3,11 @@ import * as RadixSwitch from "@radix-ui/react-switch";
 import { useReader } from "../state/reader";
 import { useSettings, DEFAULT_MODELS, type ProviderId } from "../state/settings";
 import { useUsage } from "../state/usage";
+import { useDebug } from "../state/debug";
 import { tts, OPENAI_VOICES, OPENAI_TTS_MODELS } from "../lib/tts/speech";
 import { chatCost, ttsCost, formatUSD } from "../lib/ai/pricing";
 import { ttsCacheStats, ttsCacheClear } from "../lib/storage/db";
+import type { ChatTurn } from "../lib/ai";
 import { languageName, USER_LANGUAGE } from "../lib/ai/prompts";
 import { Panel } from "./common/ui";
 
@@ -259,8 +261,67 @@ function AdvancedTab() {
         )}
         <p className="text-xs text-slate-400">Token counts are exact (reported by the API); dollar figures are estimates from list prices and may be out of date. Local (Ollama) and browser speech are free.</p>
       </Section>
+
+      <DebugSection />
     </>
   );
+}
+
+function DebugSection() {
+  const requests = useDebug((d) => d.requests);
+  const clear = useDebug((d) => d.clear);
+
+  return (
+    <Section title="Debug · raw prompts sent">
+      {requests.length === 0 ? (
+        <p className="text-sm text-slate-500 dark:text-slate-400">No assistant requests yet this session. Ask the assistant something and the exact payloads will appear here.</p>
+      ) : (
+        <>
+          <button onClick={clear} className="text-xs text-sky-600 hover:underline">Clear log</button>
+          <div className="space-y-2">
+            {requests.map((r) => (
+              <details key={r.id} className="rounded-lg border border-slate-200 dark:border-slate-700">
+                <summary className="cursor-pointer px-2 py-1.5 text-xs text-slate-600 dark:text-slate-300">
+                  {r.model || r.provider}
+                  {r.step > 0 ? ` · tool step ${r.step}` : ""} · {r.messages.length} msg{r.messages.length === 1 ? "" : "s"}
+                  {" · "}
+                  {new Date(r.at).toLocaleTimeString()}
+                </summary>
+                <div className="space-y-2 border-t border-slate-200 px-2 py-2 dark:border-slate-700">
+                  <PromptBlock role="system" text={r.system} />
+                  {r.messages.map((m, i) => (
+                    <PromptBlock key={i} role={m.role} text={formatTurn(m)} />
+                  ))}
+                  <p className="text-[10px] text-slate-400">tools: {r.tools.join(", ") || "none"}</p>
+                </div>
+              </details>
+            ))}
+          </div>
+        </>
+      )}
+      <p className="text-xs text-slate-400">Shows the system prompt and message turns sent on each call (newest first, last {20} kept). Lives in memory only and resets when you reload.</p>
+    </Section>
+  );
+}
+
+function PromptBlock({ role, text }: { role: string; text: string }) {
+  return (
+    <div>
+      <div className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{role}</div>
+      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded bg-slate-100 p-2 text-[11px] leading-snug text-slate-700 dark:bg-slate-800 dark:text-slate-200">{text}</pre>
+    </div>
+  );
+}
+
+function formatTurn(t: ChatTurn): string {
+  if (typeof t.content === "string") return t.content;
+  return t.content
+    .map((p) => {
+      if (p.type === "text") return p.text;
+      if (p.type === "tool_use") return `↳ tool_use ${p.name}(${JSON.stringify(p.input)})`;
+      return `↳ tool_result: ${p.content}`;
+    })
+    .join("\n");
 }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
