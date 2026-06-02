@@ -18,7 +18,9 @@ import { IconChevronLeft, IconChevronRight } from "./Icons";
 // width — so one flip always advances by `stride === containerWidth`, which
 // keeps every page cleanly centered. MAX_COL caps the text column at the same
 // readable width as scroll mode (Tailwind max-w-2xl ≈ 672px); MIN_PAD is the
-// minimum breathing room on narrow screens.
+// minimum breathing room on narrow screens. The colW/gap clamps keep the math
+// valid at any width (a flip always advances exactly one container width), so
+// paged mode stays paged even when squeezed — e.g. a side panel is open.
 const MAX_COL = 672;
 const MIN_PAD = 24;
 
@@ -30,17 +32,17 @@ interface PageGeo {
 }
 
 function pageGeometry(containerW: number, mode: "scroll" | "page" | "double"): PageGeo | null {
-  if (!containerW || mode === "scroll") return null;
+  if (mode === "scroll" || !containerW) return null;
   if (mode === "double") {
     // Two columns + one spine gap span the width; gap = C/2 − colW keeps the
     // pair centered and makes two columns advance exactly one container width.
-    const colW = Math.min(MAX_COL, Math.max(0, (containerW - 2 * MIN_PAD) / 2));
-    const gap = containerW / 2 - colW;
+    const colW = Math.max(1, Math.min(MAX_COL, (containerW - 2 * MIN_PAD) / 2));
+    const gap = Math.max(0, containerW / 2 - colW);
     return { colW, gap, pad: gap / 2, stride: containerW };
   }
   // One centered column; the gap is the surrounding whitespace.
-  const colW = Math.min(MAX_COL, Math.max(0, containerW - 2 * MIN_PAD));
-  const gap = containerW - colW;
+  const colW = Math.max(1, Math.min(MAX_COL, containerW - 2 * MIN_PAD));
+  const gap = Math.max(0, containerW - colW);
   return { colW, gap, pad: gap / 2, stride: containerW };
 }
 
@@ -72,6 +74,10 @@ export function Reader() {
   const trackingRef = useRef(false);
   // Pending scroll target read once per section (see resume effect below).
   const resumeRef = useRef<{ section: number; target: number | null }>({ section: -1, target: null });
+  // Block index currently at the start of the visible page — kept up to date by
+  // the progress tracker, so a reflow (resize / font change) can re-anchor the
+  // page to the same block rather than the same (now-shifted) page index.
+  const anchorRef = useRef(0);
 
   const section = book?.sections[sectionIndex];
 
@@ -93,18 +99,28 @@ export function Reader() {
   }, [mode]);
 
   // Once columns are laid out (after geo / section / font settle), the total
-  // scrollable width tells us how many pages this section spans.
+  // scrollable width tells us how many pages this section spans. A reflow —
+  // opening a side panel (e.g. Settings) or resizing the window — moves the page
+  // boundaries and shifts which text lands where, so re-anchor to the block that
+  // was at the start of the page (keeping the reader's place) rather than to the
+  // raw page index. On a section change the resume effect runs afterward and
+  // takes over the scroll position.
   useLayoutEffect(() => {
     const c = scrollRef.current;
     if (!c || !geo) return;
     const max = Math.max(0, Math.round((c.scrollWidth - c.clientWidth) / geo.stride));
-    setPg((p) => ({ page: Math.min(p.page, max), max }));
+    const anchor = blockEls.current.get(section?.blocks[anchorRef.current]?.id ?? "");
+    const page = Math.min(anchor ? pageOfEl(anchor) : pg.page, max);
+    c.scrollLeft = page * geo.stride;
+    setPg((p) => (p.page === page && p.max === max ? p : { page, max }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geo, section, fontScale]);
 
   // Flip a page; at a section edge, cross into the adjacent section.
   const flip = useCallback(
     (dir: -1 | 1) => {
       const c = scrollRef.current;
+      if (!geo) return;
       const next = pg.page + dir;
       if (next < 0) {
         if (sectionIndex > 0) setSection(sectionIndex - 1);
@@ -131,6 +147,27 @@ export function Reader() {
     [geo]
   );
 
+  // Index of the block that *starts* at (or just after) a given scroll offset —
+  // the block at the top of that page. A block's content-x is invariant of the
+  // current scroll, so this is safe to call mid-snap. Used to remember the page
+  // start for re-anchoring across reflows; a paragraph spilling in from the
+  // previous page starts earlier, so it's correctly skipped.
+  const pageStartBlock = useCallback((atLeft: number) => {
+    const c = scrollRef.current;
+    if (!c) return anchorRef.current;
+    const cl = c.getBoundingClientRect().left;
+    let best = Infinity;
+    let idx = anchorRef.current;
+    blockEls.current.forEach((el) => {
+      const left = el.getBoundingClientRect().left - cl + c.scrollLeft;
+      if (left >= atLeft - 4 && left < best) {
+        best = left;
+        idx = Number(el.dataset.blockIndex);
+      }
+    });
+    return idx;
+  }, []);
+
   // Arrow / Page keys flip pages (ignored while typing in an input).
   useEffect(() => {
     if (!paged) return;
@@ -155,6 +192,10 @@ export function Reader() {
         const page = Math.max(0, Math.min(pg.max, Math.round(c.scrollLeft / geo.stride)));
         if (Math.abs(c.scrollLeft - page * geo.stride) > 1) c.scrollTo({ left: page * geo.stride, behavior: "smooth" });
         setPg((p) => (p.page === page ? p : { ...p, page }));
+        // Remember the start-of-page block (now settled) so a later reflow can
+        // re-anchor to it. Keyed off the target page, not the live scroll, in
+        // case the snap-back above is still animating.
+        anchorRef.current = pageStartBlock(page * geo.stride);
       }, 120);
     };
     c.addEventListener("scroll", onScroll, { passive: true });
@@ -350,6 +391,7 @@ export function Reader() {
       const el = target != null ? blockEls.current.get(section?.blocks[target]?.id ?? "") : null;
       if (geo) {
         const page = el ? pageOfEl(el) : 0;
+        anchorRef.current = target ?? 0; // anchor for any reflow before tracking resumes
         setPg((p) => ({ ...p, page }));
         c?.scrollTo({ left: page * geo.stride });
         return;
@@ -380,7 +422,9 @@ export function Reader() {
       let bestIdx = 0;
       if (paged) {
         // Columns share a top edge, so "topmost" is meaningless — the earliest
-        // block still on screen is the start of the current page.
+        // block still on screen is the start of the current page. (The reflow
+        // anchor is tracked in the snap handler, only when the page is settled —
+        // updating it here would corrupt it mid-resize.)
         if (!tops.size) return;
         bestIdx = Math.min(...tops.keys());
       } else {
@@ -391,6 +435,7 @@ export function Reader() {
             bestIdx = idx;
           }
         }
+        anchorRef.current = bestIdx; // anchor for a later switch back into paged mode
       }
       setProgress(book.id, { sectionIndex, blockIndex: bestIdx } as Position);
     };
@@ -432,7 +477,7 @@ export function Reader() {
       <div
         ref={scrollRef}
         className={`relative flex-1 overscroll-contain ${
-          paged ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto"
+          geo ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto"
         }`}
         onClick={onClick}
         onMouseUp={onSelectionEnd}
@@ -475,7 +520,7 @@ export function Reader() {
             />
           ))}
 
-          {!paged && (
+          {!geo && (
             <SectionNav
               hasPrev={sectionIndex > 0}
               hasNext={sectionIndex < book.sections.length - 1}
@@ -486,7 +531,7 @@ export function Reader() {
         </article>
       </div>
 
-      {paged && (
+      {geo && (
         <PageControls
           page={pg.page}
           max={pg.max}
