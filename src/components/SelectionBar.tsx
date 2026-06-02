@@ -1,9 +1,9 @@
 import { useReader } from "../state/reader";
 import { speakSelection } from "../lib/tts/readAloud";
-import { IconSparkles, IconSpeaker, IconBookOpen, IconClose } from "./Icons";
+import { IconSparkles, IconSpeaker, IconClose } from "./Icons";
 
-// Floating actions for a highlighted passage. Explain/translate submit to the
-// assistant immediately so the user doesn't have to confirm a second time.
+// Floating actions for a highlighted passage. Explain submits to the assistant
+// immediately so the user doesn't have to confirm a second time.
 export function SelectionBar() {
   const selection = useReader((s) => s.selection);
   const book = useReader((s) => s.book);
@@ -20,11 +20,7 @@ export function SelectionBar() {
   };
 
   const explain = () => {
-    openChatWith(`Please explain this passage and any tricky words in it:\n「${text}」`, { autoSubmit: true, newChat: true });
-    dismiss();
-  };
-  const translate = () => {
-    openChatWith(`Translate this passage and note any nuance:\n「${text}」`, { autoSubmit: true, newChat: true });
+    openChatWith("Explain this passage and any tricky words in it.", { autoSubmit: true, newChat: true, passage: text });
     dismiss();
   };
   const read = () => {
@@ -36,7 +32,6 @@ export function SelectionBar() {
     <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-slate-200 bg-white/95 px-2 py-1.5 shadow-xl backdrop-blur dark:border-slate-700 dark:bg-slate-800/95">
       <span className="max-w-[8rem] truncate px-2 text-xs text-slate-400">“{short}”</span>
       <Action onClick={explain} icon={<IconSparkles className="h-4 w-4" />} label="Explain" />
-      <Action onClick={translate} icon={<IconBookOpen className="h-4 w-4" />} label="Translate" />
       <Action onClick={read} icon={<IconSpeaker className="h-4 w-4" />} label="Read" />
       <button onClick={dismiss} aria-label="Dismiss" className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
         <IconClose className="h-4 w-4" />

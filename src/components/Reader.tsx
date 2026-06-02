@@ -7,7 +7,7 @@ import { assetUrl } from "../lib/book/loader";
 import { charIndexFromPoint, charIndexOfNode, rectForRange, rectsForRange } from "../lib/dom/caret";
 import { sentenceAround } from "../lib/text";
 import { stopReadAloud } from "../lib/tts/readAloud";
-import { useReader, type ActiveLookup } from "../state/reader";
+import { useReader } from "../state/reader";
 import { useLibrary } from "../state/library";
 import { useSettings } from "../state/settings";
 import { DictPopup } from "./DictPopup";
@@ -112,9 +112,14 @@ export function Reader() {
 
   const onClick = useCallback(
     (e: React.MouseEvent) => {
-      // A drag-selection takes precedence over tap-to-define.
+      // A selection takes precedence over tap-to-define. Check both the live
+      // browser selection and our stored one: when a drag ends on a word the
+      // browser may have already collapsed its selection by the time this click
+      // fires, but the highlight we just captured is still active — defining the
+      // word here would wipe it out.
       const sel = window.getSelection();
       if (sel && !sel.isCollapsed && sel.toString().trim()) return;
+      if (useReader.getState().selection) return;
 
       const target = (e.target as HTMLElement).closest<HTMLElement>("[data-block-index]");
       if (!target) {
@@ -295,6 +300,7 @@ export function Reader() {
         onMouseLeave={clearHover}
       >
         <TtsCursor blockEls={blockEls} scrollRef={scrollRef} />
+        <ActiveWordHighlight blockEls={blockEls} scrollRef={scrollRef} />
         <article
           data-testid="reader"
           className="mx-auto max-w-2xl px-5 py-6 font-reading text-slate-800 dark:text-slate-200"
@@ -310,7 +316,6 @@ export function Reader() {
               bookId={book.id}
               index={i}
               isTts={ttsBlockId === block.id}
-              active={active && active.position.blockIndex === i ? active : null}
               registerRef={registerBlock(block.id)}
             />
           ))}
@@ -357,14 +362,12 @@ function BlockView({
   block,
   bookId,
   index,
-  active,
   isTts,
   registerRef,
 }: {
   block: Block;
   bookId: string;
   index: number;
-  active: ActiveLookup | null;
   isTts: boolean;
   registerRef: (el: HTMLElement | null) => void;
 }) {
@@ -379,7 +382,10 @@ function BlockView({
     );
   }
 
-  const content = active ? highlightActive(block.text!, active) : block.text;
+  // Plain text only — the active-word and TTS highlights are drawn as overlays
+  // (ActiveWordHighlight / TtsCursor) so tapping a word never mutates this text
+  // node and can't collapse an in-progress selection.
+  const content = block.text;
 
   const common = {
     ref: registerRef as never,
@@ -456,14 +462,37 @@ function TtsCursor({
   );
 }
 
-/** Render text with the active word wrapped in a highlight span. */
-function highlightActive(text: string, active: ActiveLookup) {
-  const { start, end } = active.token;
+/** Highlight box over the tapped (active) word. Like TtsCursor, it's an overlay
+ *  rather than an inline span, so defining a word never splits the paragraph's
+ *  text node — which would otherwise collapse a double-click / drag selection. */
+function ActiveWordHighlight({
+  blockEls,
+  scrollRef,
+}: {
+  blockEls: React.MutableRefObject<Map<string, HTMLElement>>;
+  scrollRef: React.RefObject<HTMLDivElement>;
+}) {
+  const active = useReader((s) => s.active);
+  const book = useReader((s) => s.book);
+  const sectionIndex = useReader((s) => s.sectionIndex);
+  const [boxes, setBoxes] = useState<{ top: number; left: number; width: number; height: number }[]>([]);
+
+  useLayoutEffect(() => {
+    const block = active ? book?.sections[sectionIndex]?.blocks[active.position.blockIndex] : null;
+    const el = block ? blockEls.current.get(block.id) : null;
+    const c = scrollRef.current;
+    if (!active || !el || !c) return setBoxes([]);
+    const rects = rectsForRange(el, active.token.start, active.token.end).filter((r) => r.width > 0);
+    const cr = c.getBoundingClientRect();
+    setBoxes(rects.map((r) => ({ top: r.top - cr.top + c.scrollTop, left: r.left - cr.left + c.scrollLeft, width: r.width, height: r.height })));
+  }, [active, book, sectionIndex, blockEls, scrollRef]);
+
+  if (!boxes.length) return null;
   return (
     <>
-      {text.slice(0, start)}
-      <span className="word-active">{text.slice(start, end)}</span>
-      {text.slice(end)}
+      {boxes.map((box, i) => (
+        <div key={i} aria-hidden className="pointer-events-none absolute rounded bg-amber-200/70 dark:bg-amber-500/40" style={box} />
+      ))}
     </>
   );
 }

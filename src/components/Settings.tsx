@@ -330,10 +330,11 @@ function Segmented({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="flex rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
+    <div className="inline-flex rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800">
       {options.map(([id, label]) => (
         <button
           key={id}
+          type="button"
           onClick={() => onChange(id)}
           className={`rounded-md px-2.5 py-1 text-xs ${value === id ? "bg-white text-slate-800 shadow-sm dark:bg-slate-600 dark:text-white" : "text-slate-500 dark:text-slate-400"}`}
         >

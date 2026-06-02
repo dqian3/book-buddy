@@ -12,15 +12,20 @@ export interface Conversation {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  /** A passage the chat was started from (kept in the system prompt). */
+  passage?: string;
 }
 
 const DEFAULT_TITLE = "New chat";
 
+function snippet(text: string): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > 42 ? line.slice(0, 42) + "…" : line;
+}
+
 function titleFrom(messages: ChatMessage[]): string {
   const first = messages.find((m) => m.role === "user" && m.content.trim());
-  if (!first) return DEFAULT_TITLE;
-  const line = first.content.replace(/\s+/g, " ").trim();
-  return line.length > 42 ? line.slice(0, 42) + "…" : line;
+  return first ? snippet(first.content) : DEFAULT_TITLE;
 }
 
 export interface ChatState {
@@ -33,8 +38,9 @@ export interface ChatState {
   list: (bookId: string) => Conversation[];
   /** The active conversation, or null if none exists yet. */
   active: (bookId: string) => Conversation | null;
-  /** Start a fresh conversation and make it active; returns its id. */
-  newChat: (bookId: string) => string;
+  /** Start a fresh conversation and make it active; returns its id. When a
+   *  passage is given, the chat is anchored to it (title + system prompt). */
+  newChat: (bookId: string, passage?: string) => string;
   setActive: (bookId: string, id: string) => void;
   /** Append a message to the active conversation (creating one if needed). */
   addMessage: (bookId: string, msg: Omit<ChatMessage, "id" | "createdAt">) => string;
@@ -59,12 +65,13 @@ export const useChat = create<ChatState>()(
         return (get().conversations[bookId] ?? []).find((c) => c.id === id) ?? null;
       },
 
-      newChat: (bookId) => {
+      newChat: (bookId, passage) => {
         const id = uid();
         const now = Date.now();
+        const title = passage?.trim() ? snippet(passage) : DEFAULT_TITLE;
         set((s) => {
           const prev = s.conversations[bookId] ?? [];
-          const next = [...prev, { id, title: DEFAULT_TITLE, createdAt: now, updatedAt: now, messages: [] }].slice(-MAX_CONVERSATIONS);
+          const next = [...prev, { id, title, createdAt: now, updatedAt: now, messages: [], passage: passage?.trim() || undefined }].slice(-MAX_CONVERSATIONS);
           return {
             conversations: { ...s.conversations, [bookId]: next },
             activeId: { ...s.activeId, [bookId]: id },

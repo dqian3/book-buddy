@@ -50,7 +50,7 @@ interface ReaderState {
   ttsWord: TtsWord | null;
   panel: Panel | null;
   /** Prefill (or auto-submit) for the chat composer from a quick action. */
-  chatPrefill: { text: string; autoSubmit?: boolean; newChat?: boolean } | null;
+  chatPrefill: { text: string; autoSubmit?: boolean; newChat?: boolean; passage?: string } | null;
 
   open: (bookId: string) => Promise<void>;
   close: () => void;
@@ -62,8 +62,8 @@ interface ReaderState {
   setTtsPaused: (paused: boolean) => void;
   setTtsWord: (word: TtsWord | null) => void;
   setPanel: (p: Panel | null) => void;
-  openChatWith: (text: string, options?: { autoSubmit?: boolean; newChat?: boolean }) => void;
-  consumeChatPrefill: () => { text: string; autoSubmit?: boolean; newChat?: boolean } | null;
+  openChatWith: (text: string, options?: { autoSubmit?: boolean; newChat?: boolean; passage?: string }) => void;
+  consumeChatPrefill: () => { text: string; autoSubmit?: boolean; newChat?: boolean; passage?: string } | null;
 }
 
 export const useReader = create<ReaderState>((set, get) => ({
@@ -123,7 +123,7 @@ export const useReader = create<ReaderState>((set, get) => ({
   setTtsWord: (word) => set({ ttsWord: word }),
   setPanel: (p) => set({ panel: p }),
   openChatWith: (text, options) =>
-    set({ chatPrefill: { text, autoSubmit: options?.autoSubmit, newChat: options?.newChat }, panel: "chat", active: null }),
+    set({ chatPrefill: { text, autoSubmit: options?.autoSubmit, newChat: options?.newChat, passage: options?.passage }, panel: "chat", active: null }),
   consumeChatPrefill: () => {
     const v = get().chatPrefill;
     if (v !== null) set({ chatPrefill: null });

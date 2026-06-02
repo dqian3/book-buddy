@@ -51,7 +51,7 @@ export function ChatPanel() {
     if (!open || !book) return;
     const pre = consumeChatPrefill();
     if (!pre) return;
-    if (pre.newChat) newChat(book.id); // highlight actions start a fresh conversation
+    if (pre.newChat) newChat(book.id, pre.passage); // highlight actions start a fresh conversation
     if (pre.autoSubmit) send(pre.text);
     else setInput(pre.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,6 +98,7 @@ export function ChatPanel() {
       tone: settings.tone,
       locationLabel,
       currentParagraph,
+      highlightedPassage: useChat.getState().active(book.id)?.passage,
       spoilerFree: settings.spoilerFree,
     });
 

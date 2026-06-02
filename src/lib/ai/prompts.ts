@@ -30,6 +30,9 @@ export interface BuildSystemArgs {
    *  short questions like "what does X mean" can be answered without the
    *  user having to highlight the surrounding sentence. */
   currentParagraph?: string;
+  /** A passage the reader highlighted to ask about. When set, it's the subject
+   *  of the conversation — "this passage" refers to it. */
+  highlightedPassage?: string;
   /** When true, restrict the agent to what the reader has already read. */
   spoilerFree: boolean;
 }
@@ -71,6 +74,7 @@ export function buildSystemPrompt({
   tone,
   locationLabel,
   currentParagraph,
+  highlightedPassage,
   spoilerFree,
 }: BuildSystemArgs): string {
   const lang = languageName(book.language);
@@ -87,6 +91,12 @@ export function buildSystemPrompt({
     parts.push(
       "",
       `Reader's current paragraph (treat this as the default context for any word, phrase, or pronoun they ask about — no need to call search_book just for this):\n「${currentParagraph.trim()}」`
+    );
+  }
+  if (highlightedPassage?.trim()) {
+    parts.push(
+      "",
+      `The reader highlighted this passage to ask about — it is the subject of this conversation. When they say "this passage" (or ask to explain/translate it) they mean this text, so work from it directly without calling search_book:\n「${highlightedPassage.trim()}」`
     );
   }
 
