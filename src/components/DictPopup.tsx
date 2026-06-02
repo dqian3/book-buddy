@@ -38,7 +38,6 @@ export function DictPopup({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const showPinyin = useSettings((s) => s.showPinyin);
   const dictionary = useReader((s) => s.services?.dictionary ?? null);
   const book = useReader((s) => s.book);
   const setActive = useReader((s) => s.setActive);
@@ -100,7 +99,7 @@ export function DictPopup({
     >
       <div className={`flex items-baseline gap-2 ${persistent ? "pr-14" : ""}`}>
         <span className="font-reading text-base leading-tight text-slate-900 dark:text-slate-100">{word}</span>
-        {showPinyin && primary?.pinyin && (
+        {primary?.pinyin && (
           <span className="text-xs text-sky-700 dark:text-sky-300">{primary.pinyin}</span>
         )}
       </div>
@@ -117,7 +116,7 @@ export function DictPopup({
           {chars.map(({ char, entry }) => (
             <div key={char} className="flex items-baseline gap-2 text-xs">
               <span className="font-reading text-sm leading-tight text-slate-900 dark:text-slate-100">{char}</span>
-              {showPinyin && entry?.pinyin && (
+              {entry?.pinyin && (
                 <span className="text-sky-700 dark:text-sky-300">{entry.pinyin}</span>
               )}
               <span className="min-w-0 flex-1 truncate text-slate-600 dark:text-slate-300">

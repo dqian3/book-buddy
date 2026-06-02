@@ -53,11 +53,15 @@ export function Settings() {
         <Row label={`Text size (${s.fontScale.toFixed(2)}×)`}>
           <input type="range" min={0.8} max={1.8} step={0.05} value={s.fontScale} onChange={(e) => s.update({ fontScale: Number(e.target.value) })} className="w-40" />
         </Row>
-        <Row label="Show pinyin">
-          <Toggle checked={s.showPinyin} onChange={(v) => s.update({ showPinyin: v })} />
-        </Row>
         <Row label="Show translation on hover">
           <Toggle checked={s.hoverTranslate} onChange={(v) => s.update({ hoverTranslate: v })} />
+        </Row>
+        <Row label="Layout">
+          <Segmented
+            value={s.readingMode}
+            options={[["scroll", "Scroll"], ["page", "Page"], ["double", "Two pages"]]}
+            onChange={(v) => s.update({ readingMode: v as typeof s.readingMode })}
+          />
         </Row>
       </Section>
 

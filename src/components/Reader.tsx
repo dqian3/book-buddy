@@ -13,6 +13,37 @@ import { useSettings } from "../state/settings";
 import { DictPopup } from "./DictPopup";
 import { IconChevronLeft, IconChevronRight } from "./Icons";
 
+// Paged-mode geometry. Pages are CSS columns; the column gap and side padding
+// are sized so a single page (or a two-page spread) spans exactly the container
+// width — so one flip always advances by `stride === containerWidth`, which
+// keeps every page cleanly centered. MAX_COL caps the text column at the same
+// readable width as scroll mode (Tailwind max-w-2xl ≈ 672px); MIN_PAD is the
+// minimum breathing room on narrow screens.
+const MAX_COL = 672;
+const MIN_PAD = 24;
+
+interface PageGeo {
+  colW: number;
+  gap: number;
+  pad: number;
+  stride: number;
+}
+
+function pageGeometry(containerW: number, mode: "scroll" | "page" | "double"): PageGeo | null {
+  if (!containerW || mode === "scroll") return null;
+  if (mode === "double") {
+    // Two columns + one spine gap span the width; gap = C/2 − colW keeps the
+    // pair centered and makes two columns advance exactly one container width.
+    const colW = Math.min(MAX_COL, Math.max(0, (containerW - 2 * MIN_PAD) / 2));
+    const gap = containerW / 2 - colW;
+    return { colW, gap, pad: gap / 2, stride: containerW };
+  }
+  // One centered column; the gap is the surrounding whitespace.
+  const colW = Math.min(MAX_COL, Math.max(0, containerW - 2 * MIN_PAD));
+  const gap = containerW - colW;
+  return { colW, gap, pad: gap / 2, stride: containerW };
+}
+
 export function Reader() {
   // Subscribe to fields individually so panel/selection changes (e.g. opening a
   // sidebar) don't re-render the reader and rebuild every block in the section.
@@ -30,6 +61,8 @@ export function Reader() {
   // the reader and rebuild every block.
   const fontScale = useSettings((s) => s.fontScale);
   const hoverTranslate = useSettings((s) => s.hoverTranslate);
+  const mode = useSettings((s) => s.readingMode);
+  const paged = mode !== "scroll";
   const setProgress = useLibrary((s) => s.setProgress);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -41,6 +74,95 @@ export function Reader() {
   const resumeRef = useRef<{ section: number; target: number | null }>({ section: -1, target: null });
 
   const section = book?.sections[sectionIndex];
+
+  // --- Paged mode ----------------------------------------------------------
+  // geo holds the page column geometry (null in scroll mode); pg tracks the
+  // current page and the last page index for the flip controls.
+  const [geo, setGeo] = useState<PageGeo | null>(null);
+  const [pg, setPg] = useState({ page: 0, max: 0 });
+
+  // Recompute the geometry from the container width (and on resize / mode).
+  useLayoutEffect(() => {
+    const c = scrollRef.current;
+    if (!c) return;
+    const measure = () => setGeo(pageGeometry(c.clientWidth, mode));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(c);
+    return () => ro.disconnect();
+  }, [mode]);
+
+  // Once columns are laid out (after geo / section / font settle), the total
+  // scrollable width tells us how many pages this section spans.
+  useLayoutEffect(() => {
+    const c = scrollRef.current;
+    if (!c || !geo) return;
+    const max = Math.max(0, Math.round((c.scrollWidth - c.clientWidth) / geo.stride));
+    setPg((p) => ({ page: Math.min(p.page, max), max }));
+  }, [geo, section, fontScale]);
+
+  // Flip a page; at a section edge, cross into the adjacent section.
+  const flip = useCallback(
+    (dir: -1 | 1) => {
+      const c = scrollRef.current;
+      const next = pg.page + dir;
+      if (next < 0) {
+        if (sectionIndex > 0) setSection(sectionIndex - 1);
+        return;
+      }
+      if (next > pg.max) {
+        if (book && sectionIndex < book.sections.length - 1) setSection(sectionIndex + 1);
+        return;
+      }
+      setPg((p) => ({ ...p, page: next }));
+      if (geo) c?.scrollTo({ left: next * geo.stride, behavior: "smooth" });
+    },
+    [pg, geo, sectionIndex, setSection, book]
+  );
+
+  // Which page a block element currently sits on (a flip is one container width).
+  const pageOfEl = useCallback(
+    (el: HTMLElement) => {
+      const c = scrollRef.current;
+      if (!c || !geo) return 0;
+      const left = el.getBoundingClientRect().left - c.getBoundingClientRect().left + c.scrollLeft;
+      return Math.max(0, Math.floor(left / geo.stride));
+    },
+    [geo]
+  );
+
+  // Arrow / Page keys flip pages (ignored while typing in an input).
+  useEffect(() => {
+    if (!paged) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = document.activeElement?.tagName;
+      if (t === "INPUT" || t === "TEXTAREA") return;
+      if (e.key === "ArrowRight" || e.key === "PageDown") (e.preventDefault(), flip(1));
+      else if (e.key === "ArrowLeft" || e.key === "PageUp") (e.preventDefault(), flip(-1));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [paged, flip]);
+
+  // Swipe / trackpad scrolling: snap to the nearest page once it settles.
+  useEffect(() => {
+    const c = scrollRef.current;
+    if (!c || !geo) return;
+    let timer = 0;
+    const onScroll = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const page = Math.max(0, Math.min(pg.max, Math.round(c.scrollLeft / geo.stride)));
+        if (Math.abs(c.scrollLeft - page * geo.stride) > 1) c.scrollTo({ left: page * geo.stride, behavior: "smooth" });
+        setPg((p) => (p.page === page ? p : { ...p, page }));
+      }, 120);
+    };
+    c.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      c.removeEventListener("scroll", onScroll);
+      window.clearTimeout(timer);
+    };
+  }, [geo, pg.max]);
 
   // --- Hover to translate (optional) ---------------------------------------
   const [hover, setHover] = useState<HoverInfo | null>(null);
@@ -194,12 +316,19 @@ export function Reader() {
     const el = blockEls.current.get(ttsBlockId);
     const c = scrollRef.current;
     if (!el || !c) return;
+    if (geo) {
+      // Flip to the page the spoken block is on.
+      const page = pageOfEl(el);
+      setPg((p) => (p.page === page ? p : { ...p, page }));
+      c.scrollTo({ left: page * geo.stride, behavior: "smooth" });
+      return;
+    }
     const er = el.getBoundingClientRect();
     const cr = c.getBoundingClientRect();
     if (er.top < cr.top + 48 || er.bottom > cr.bottom - 48) {
       el.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-  }, [ttsBlockId]);
+  }, [ttsBlockId, geo, pageOfEl]);
 
   // --- Resume / jump scrolling --------------------------------------------
   useLayoutEffect(() => {
@@ -217,13 +346,16 @@ export function Reader() {
     const target = resumeRef.current.target;
     trackingRef.current = false; // pause progress saving until we've anchored
     const apply = () => {
-      if (target == null) {
-        scrollRef.current?.scrollTo({ top: 0 });
+      const c = scrollRef.current;
+      const el = target != null ? blockEls.current.get(section?.blocks[target]?.id ?? "") : null;
+      if (geo) {
+        const page = el ? pageOfEl(el) : 0;
+        setPg((p) => ({ ...p, page }));
+        c?.scrollTo({ left: page * geo.stride });
         return;
       }
-      const el = blockEls.current.get(section?.blocks[target]?.id ?? "");
       if (el) el.scrollIntoView({ block: "start" });
-      else scrollRef.current?.scrollTo({ top: 0 });
+      else c?.scrollTo({ top: 0 });
     };
     apply();
     // Re-apply after layout settles, then start tracking. Without this the
@@ -246,11 +378,18 @@ export function Reader() {
       raf = 0;
       if (!trackingRef.current) return; // don't clobber the resume target before anchoring
       let bestIdx = 0;
-      let bestTop = Infinity;
-      for (const [idx, top] of tops) {
-        if (top >= -4 && top < bestTop) {
-          bestTop = top;
-          bestIdx = idx;
+      if (paged) {
+        // Columns share a top edge, so "topmost" is meaningless — the earliest
+        // block still on screen is the start of the current page.
+        if (!tops.size) return;
+        bestIdx = Math.min(...tops.keys());
+      } else {
+        let bestTop = Infinity;
+        for (const [idx, top] of tops) {
+          if (top >= -4 && top < bestTop) {
+            bestTop = top;
+            bestIdx = idx;
+          }
         }
       }
       setProgress(book.id, { sectionIndex, blockIndex: bestIdx } as Position);
@@ -268,7 +407,7 @@ export function Reader() {
     );
     blockEls.current.forEach((el) => io.observe(el));
     return () => io.disconnect();
-  }, [book, section, sectionIndex, setProgress]);
+  }, [book, section, sectionIndex, setProgress, paged]);
 
   // Close the dict popup on scroll (its anchor rect goes stale).
   useEffect(() => {
@@ -292,7 +431,9 @@ export function Reader() {
     <div className="relative flex h-full flex-col">
       <div
         ref={scrollRef}
-        className="relative flex-1 overflow-y-auto overscroll-contain"
+        className={`relative flex-1 overscroll-contain ${
+          paged ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto"
+        }`}
         onClick={onClick}
         onMouseUp={onSelectionEnd}
         onTouchEnd={onSelectionEnd}
@@ -303,8 +444,22 @@ export function Reader() {
         <ActiveWordHighlight blockEls={blockEls} scrollRef={scrollRef} />
         <article
           data-testid="reader"
-          className="mx-auto max-w-2xl px-5 py-6 font-reading text-slate-800 dark:text-slate-200"
-          style={fontStyle}
+          className={`font-reading text-slate-800 dark:text-slate-200 ${
+            geo ? "h-full" : "mx-auto max-w-2xl px-5 py-6"
+          }`}
+          style={
+            geo
+              ? {
+                  ...fontStyle,
+                  height: "100%",
+                  boxSizing: "border-box",
+                  padding: `24px ${geo.pad}px`,
+                  columnWidth: geo.colW || undefined,
+                  columnGap: geo.gap,
+                  columnFill: "auto",
+                }
+              : fontStyle
+          }
         >
           <h1 className="mb-6 text-center text-2xl font-bold text-slate-900 dark:text-slate-100">
             {section.title || book.title}
@@ -320,14 +475,27 @@ export function Reader() {
             />
           ))}
 
-          <SectionNav
-            hasPrev={sectionIndex > 0}
-            hasNext={sectionIndex < book.sections.length - 1}
-            onPrev={() => setSection(sectionIndex - 1)}
-            onNext={() => setSection(sectionIndex + 1)}
-          />
+          {!paged && (
+            <SectionNav
+              hasPrev={sectionIndex > 0}
+              hasNext={sectionIndex < book.sections.length - 1}
+              onPrev={() => setSection(sectionIndex - 1)}
+              onNext={() => setSection(sectionIndex + 1)}
+            />
+          )}
         </article>
       </div>
+
+      {paged && (
+        <PageControls
+          page={pg.page}
+          max={pg.max}
+          canPrev={pg.page > 0 || sectionIndex > 0}
+          canNext={pg.page < pg.max || sectionIndex < book.sections.length - 1}
+          onPrev={() => flip(-1)}
+          onNext={() => flip(1)}
+        />
+      )}
 
       {(() => {
         // Render exactly one popup instance — when the user clicks a hovered
@@ -502,6 +670,48 @@ interface HoverInfo {
   entries: DictEntry[];
   /** Anchor rect (viewport coords) of the hovered word. */
   rect: DOMRect;
+}
+
+/** Flip-through controls for paged mode: tappable edge zones (left/right) and a
+ *  small page indicator. Rendered outside the scroller so they stay put. */
+function PageControls({
+  page,
+  max,
+  canPrev,
+  canNext,
+  onPrev,
+  onNext,
+}: {
+  page: number;
+  max: number;
+  canPrev: boolean;
+  canNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <>
+      <button
+        aria-label="Previous page"
+        disabled={!canPrev}
+        onClick={onPrev}
+        className="group absolute inset-y-0 left-0 flex w-12 items-center justify-center text-slate-400 disabled:opacity-0 sm:w-14"
+      >
+        <IconChevronLeft className="h-6 w-6 opacity-40 transition-opacity group-hover:opacity-100" />
+      </button>
+      <button
+        aria-label="Next page"
+        disabled={!canNext}
+        onClick={onNext}
+        className="group absolute inset-y-0 right-0 flex w-12 items-center justify-center text-slate-400 disabled:opacity-0 sm:w-14"
+      >
+        <IconChevronRight className="h-6 w-6 opacity-40 transition-opacity group-hover:opacity-100" />
+      </button>
+      <div className="pointer-events-none absolute bottom-1 left-1/2 -translate-x-1/2 text-xs tabular-nums text-slate-400 dark:text-slate-500">
+        {page + 1} / {max + 1}
+      </div>
+    </>
+  );
 }
 
 function SectionNav({

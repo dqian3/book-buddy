@@ -16,7 +16,7 @@ external/local model.
 ```bash
 npm run dev          # Vite dev server (also reachable from a phone on the LAN)
 npm run build        # tsc --noEmit (typecheck) + vite build
-npm run seed         # build:dict:zh + ingest the bundled 射雕英雄传 — run once after install
+npm run seed         # build:dict:zh + ingest the 三國演義 sample — run once after install
 npm run build:dict:zh  # download CC-CEDICT → public/data/dict/cc-cedict.json (Chinese dictionary)
 npm run ingest -- <file> --lang <code> [--id slug] [--title T] [--author A]
 ```
@@ -109,4 +109,5 @@ and back to a screen rect via `lib/dom/caret.ts`, then segments with the tokeniz
 - **PDF ingestion is best-effort** (layout reconstructed heuristically). EPUB/HTML
   extract cleanly. Scanned/image-only PDFs need OCR, which isn't supported.
 - API keys are sent **directly from the browser** to the provider; there is no proxy.
-- The bundled book ships as source in `books/`; it is not in the app until ingested.
+- Public-domain sample books ship as source in `sample-books/` (三國演義, Don
+  Quijote); they are not in the app until ingested (`npm run seed` does the first).

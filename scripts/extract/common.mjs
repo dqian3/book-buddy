@@ -43,13 +43,21 @@ export function makeBuilder() {
   };
 }
 
+/** First non-empty block's text, truncated — a fallback title for sections
+ *  that carry no heading (e.g. EPUB documents whose chapter line is a plain
+ *  <p>), so the table of contents shows something meaningful instead of blank. */
+function fallbackTitle(blocks) {
+  const first = blocks.find((b) => b.text)?.text ?? "";
+  return first.length > 60 ? first.slice(0, 60) + "…" : first;
+}
+
 /** Assign stable ids and drop empty sections. */
 export function finalizeSections(sections) {
   return sections
     .filter((s) => s.blocks.length > 0)
     .map((s, si) => ({
       index: si,
-      title: s.title,
+      title: s.title || fallbackTitle(s.blocks),
       blocks: s.blocks.map((b, bi) => ({ id: `s${si}b${bi}`, ...b })),
     }));
 }

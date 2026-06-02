@@ -5,6 +5,7 @@ import { DEFAULT_SYSTEM_TEMPLATE, type ExplainIn } from "../lib/ai/prompts";
 export type ProviderId = "claude" | "openai" | "ollama";
 export type ThemePref = "light" | "dark" | "system";
 export type TtsEngine = "browser" | "openai";
+export type ReadingMode = "scroll" | "page" | "double";
 
 export interface ProviderConfig {
   claude: { apiKey: string; model: string };
@@ -22,8 +23,9 @@ export interface SettingsState {
   // Reading
   theme: ThemePref;
   fontScale: number;
-  showPinyin: boolean;
   hoverTranslate: boolean;
+  /** Continuous scroll, single flip-through page, or two-page spread. */
+  readingMode: ReadingMode;
 
   // TTS
   ttsEngine: TtsEngine;
@@ -51,8 +53,8 @@ export const useSettings = create<SettingsState>()(
     (set) => ({
       theme: "system",
       fontScale: 1.1,
-      showPinyin: true,
       hoverTranslate: false,
+      readingMode: "scroll",
 
       ttsEngine: "browser",
       ttsRate: 1,

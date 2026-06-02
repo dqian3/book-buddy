@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "ingest": "node scripts/ingest.mjs",
     "build:dict:zh": "node scripts/lang/zh/build-dict.mjs",
-    "seed": "node scripts/lang/zh/build-dict.mjs && node scripts/ingest.mjs \"books/射雕英雄传-金庸-converted.html\" --lang zh --id shediao --title \"射雕英雄传\" --author \"金庸\""
+    "seed": "node scripts/lang/zh/build-dict.mjs && node scripts/ingest.mjs sample-books/sanguo-yanyi.epub --lang zh --id sanguo --title \"三國演義\" --author \"羅貫中\""
   },
   "dependencies": {
     "@radix-ui/react-switch": "^1.2.6",

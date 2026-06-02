@@ -26,6 +26,7 @@ const MAX_AGENT_STEPS = 5;
 
 export function ChatPanel() {
   const { book, chunks, sectionIndex, panel, setPanel, selection, consumeChatPrefill } = useReader();
+  const chatPrefill = useReader((s) => s.chatPrefill);
   const newChat = useChat((s) => s.newChat);
   const setActiveChat = useChat((s) => s.setActive);
   const addMessage = useChat((s) => s.addMessage);
@@ -47,16 +48,17 @@ export function ChatPanel() {
 
   // Pull in a prefilled question from a tap/selection action. If the caller
   // asked for auto-submit (e.g. the highlight bar's "Explain"), skip the
-  // composer and fire the request straight away.
+  // composer and fire the request straight away. Depends on `chatPrefill` so
+  // re-clicks from the highlight bar fire even when the panel is already open.
   useEffect(() => {
-    if (!open || !book) return;
+    if (!open || !book || !chatPrefill) return;
     const pre = consumeChatPrefill();
     if (!pre) return;
     if (pre.newChat) newChat(book.id, pre.passage); // highlight actions start a fresh conversation
     if (pre.autoSubmit) send(pre.text);
     else setInput(pre.text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, book, consumeChatPrefill]);
+  }, [open, book, chatPrefill, consumeChatPrefill]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });

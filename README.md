@@ -6,8 +6,10 @@ almost entirely on their own. Your mileage may vary with how easy it is to work 
 A mobile/tablet-friendly reading companion for books in a foreign or archaic
 language. Tap a word for an instant dictionary, ask an AI to explain or translate
 a passage (optionally **spoiler-free**), have it **read aloud** for free, and pick
-up exactly where you left off. Ships with the Chinese novel 《射雕英雄传》(Jin Yong)
-and is general enough for other languages and classics (Shakespeare, the Bible, …).
+up exactly where you left off. Ships with two public-domain samples in
+[`sample-books/`](./sample-books) — 《三國演義》 (Romance of the Three Kingdoms) and
+*Don Quijote* — and is general enough for other languages and classics
+(Shakespeare, the Bible, …).
 
 It runs as a **static front-end** — no backend. Your data (settings, reading
 progress, bookmarks, saved words, chat history, API keys) stays **local** in your
@@ -37,7 +39,7 @@ external/local model, and only when you ask it something.
 
 ```bash
 npm install
-npm run seed      # downloads CC-CEDICT + ingests the bundled 射雕英雄传
+npm run seed      # downloads CC-CEDICT + ingests the 三國演義 sample
 npm run dev       # open the printed URL (also reachable from a phone on your LAN)
 ```
 
@@ -45,6 +47,25 @@ Then open the app, tap the book, and start reading. To use the AI, open
 **Settings → AI assistant**, pick a provider, and (for Claude/OpenAI) paste an API
 key — it's stored only in your browser. For a free/offline option, install
 [Ollama](https://ollama.com), `ollama pull qwen2.5`, and select **Ollama**.
+
+## Sample books
+
+Two public-domain EPUBs ship in [`sample-books/`](./sample-books) so you have
+something to read immediately. `npm run seed` ingests the first; add the second
+(or both, if you skipped seed) with:
+
+```bash
+# 三國演義 — Chinese; needs the CC-CEDICT dictionary (npm run build:dict:zh or seed)
+node scripts/ingest.mjs sample-books/sanguo-yanyi.epub --lang zh --id sanguo \
+  --title "三國演義" --author "羅貫中"
+
+# Don Quijote — Spanish; whitespace tokenizing, AI covers definitions
+node scripts/ingest.mjs sample-books/don-quijote.epub --lang es --id quijote \
+  --title "Don Quijote de la Mancha" --author "Miguel de Cervantes"
+```
+
+Both come from [Project Gutenberg](https://www.gutenberg.org) (三國演義 #23950,
+Don Quijote #2000) and are public domain.
 
 ## Adding your own books
 
