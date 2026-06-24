@@ -25,10 +25,32 @@ function caretFromPoint(x: number, y: number): CaretPos | null {
   return null;
 }
 
+/** Whether the screen point actually falls on the glyph at this caret rather
+ *  than merely near it. caretRangeFromPoint snaps to the closest caret even when
+ *  the point is in empty space — e.g. the blank area below the last line of a
+ *  paged column — which would otherwise resolve to a far-off "random" word. The
+ *  client rect of a one-character range covers the full line box, so a tap
+ *  anywhere on a line counts but a tap in the empty margin/footer is rejected. */
+function pointOnGlyph(pos: CaretPos, x: number, y: number): boolean {
+  if (pos.node.nodeType !== Node.TEXT_NODE) return true;
+  const text = pos.node.textContent ?? "";
+  if (!text.length) return false;
+  const start = Math.min(pos.offset, text.length - 1); // char on either side of the caret
+  const range = document.createRange();
+  range.setStart(pos.node, start);
+  range.setEnd(pos.node, start + 1);
+  const PAD = 6;
+  for (const r of range.getClientRects()) {
+    if (x >= r.left - PAD && x <= r.right + PAD && y >= r.top - PAD && y <= r.bottom + PAD) return true;
+  }
+  return false;
+}
+
 /** Absolute character index within `container` for the given screen point. */
 export function charIndexFromPoint(container: HTMLElement, x: number, y: number): number | null {
   const pos = caretFromPoint(x, y);
   if (!pos || !container.contains(pos.node)) return null;
+  if (!pointOnGlyph(pos, x, y)) return null;
   let idx = 0;
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   let node: Node | null;

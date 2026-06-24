@@ -68,6 +68,11 @@ export function Reader() {
   const setProgress = useLibrary((s) => s.setProgress);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The translated "track" that holds the columns in paged mode. Page position is
+  // a CSS transform on this element (not native horizontal scroll) — that removes
+  // the scroll-snap feedback loop (which caused rapid taps to jump back and
+  // forth) and the scroll clamp (which left the last page off-centre).
+  const trackRef = useRef<HTMLDivElement>(null);
   const blockEls = useRef<Map<string, HTMLElement>>(new Map());
   // Gates progress saving so the IntersectionObserver can't overwrite the saved
   // resume position with block 0 before the resume scroll has been applied.
@@ -78,14 +83,32 @@ export function Reader() {
   // the progress tracker, so a reflow (resize / font change) can re-anchor the
   // page to the same block rather than the same (now-shifted) page index.
   const anchorRef = useRef(0);
+  // Live mirrors of pg.page / pg.max so flip() can advance synchronously across
+  // rapid taps (state batching would otherwise collapse several taps into one).
+  const pageRef = useRef(0);
+  const maxRef = useRef(0);
+  // Set when crossing *backwards* into a section: land on its last page, not its
+  // first. Read by the resume effect once the new section's columns are laid out.
+  const pendingEndRef = useRef(false);
+  // Marks the click that ended a swipe so tap-to-define doesn't also fire.
+  const swipedRef = useRef(false);
 
   const section = book?.sections[sectionIndex];
 
   // --- Paged mode ----------------------------------------------------------
   // geo holds the page column geometry (null in scroll mode); pg tracks the
-  // current page and the last page index for the flip controls.
+  // current page and the last page index for the flip controls. `animate` gates
+  // the transform transition: on (user flips) it slides, off (resume / reflow)
+  // it jumps so a section change or panel resize doesn't visibly slide.
   const [geo, setGeo] = useState<PageGeo | null>(null);
   const [pg, setPg] = useState({ page: 0, max: 0 });
+  const [animate, setAnimate] = useState(false);
+
+  // Keep the refs in sync for the synchronous readers above.
+  useEffect(() => {
+    pageRef.current = pg.page;
+    maxRef.current = pg.max;
+  }, [pg]);
 
   // Recompute the geometry from the container width (and on resize / mode).
   useLayoutEffect(() => {
@@ -107,59 +130,33 @@ export function Reader() {
   // takes over the scroll position.
   useLayoutEffect(() => {
     const c = scrollRef.current;
-    if (!c || !geo) return;
-    const max = Math.max(0, Math.round((c.scrollWidth - c.clientWidth) / geo.stride));
+    const t = trackRef.current;
+    if (!c || !t || !geo) return;
+    // The track lays its columns out wider than the viewport; its scrollWidth
+    // (transform-invariant) tells us how many pages the section spans.
+    const max = Math.max(0, Math.round((t.scrollWidth - c.clientWidth) / geo.stride));
     const anchor = blockEls.current.get(section?.blocks[anchorRef.current]?.id ?? "");
-    const page = Math.min(anchor ? pageOfEl(anchor) : pg.page, max);
-    c.scrollLeft = page * geo.stride;
+    const page = Math.min(anchor ? pageOfEl(anchor) : pageRef.current, max);
+    pageRef.current = page;
+    maxRef.current = max;
+    setAnimate(false); // a reflow re-anchor should snap, not slide
     setPg((p) => (p.page === page && p.max === max ? p : { page, max }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geo, section, fontScale]);
 
-  // Flip a page; at a section edge, cross into the adjacent section.
-  const flip = useCallback(
-    (dir: -1 | 1) => {
-      const c = scrollRef.current;
-      if (!geo) return;
-      const next = pg.page + dir;
-      if (next < 0) {
-        if (sectionIndex > 0) setSection(sectionIndex - 1);
-        return;
-      }
-      if (next > pg.max) {
-        if (book && sectionIndex < book.sections.length - 1) setSection(sectionIndex + 1);
-        return;
-      }
-      setPg((p) => ({ ...p, page: next }));
-      if (geo) c?.scrollTo({ left: next * geo.stride, behavior: "smooth" });
-    },
-    [pg, geo, sectionIndex, setSection, book]
-  );
-
-  // Which page a block element currently sits on (a flip is one container width).
-  const pageOfEl = useCallback(
-    (el: HTMLElement) => {
-      const c = scrollRef.current;
-      if (!c || !geo) return 0;
-      const left = el.getBoundingClientRect().left - c.getBoundingClientRect().left + c.scrollLeft;
-      return Math.max(0, Math.floor(left / geo.stride));
-    },
-    [geo]
-  );
-
-  // Index of the block that *starts* at (or just after) a given scroll offset —
-  // the block at the top of that page. A block's content-x is invariant of the
-  // current scroll, so this is safe to call mid-snap. Used to remember the page
-  // start for re-anchoring across reflows; a paragraph spilling in from the
-  // previous page starts earlier, so it's correctly skipped.
+  // Index of the block that *starts* at (or just after) a given content offset —
+  // the block at the top of that page. Measured against the track (transform-
+  // invariant: the page block and the track translate together), so it's valid
+  // at any page. A paragraph spilling in from the previous page starts earlier,
+  // so it's correctly skipped.
   const pageStartBlock = useCallback((atLeft: number) => {
-    const c = scrollRef.current;
-    if (!c) return anchorRef.current;
-    const cl = c.getBoundingClientRect().left;
+    const t = trackRef.current;
+    if (!t) return anchorRef.current;
+    const tl = t.getBoundingClientRect().left;
     let best = Infinity;
     let idx = anchorRef.current;
     blockEls.current.forEach((el) => {
-      const left = el.getBoundingClientRect().left - cl + c.scrollLeft;
+      const left = el.getBoundingClientRect().left - tl;
       if (left >= atLeft - 4 && left < best) {
         best = left;
         idx = Number(el.dataset.blockIndex);
@@ -167,6 +164,56 @@ export function Reader() {
     });
     return idx;
   }, []);
+
+  // Which page a block element sits on. Measured relative to the track, so the
+  // current transform cancels out.
+  const pageOfEl = useCallback(
+    (el: HTMLElement) => {
+      const t = trackRef.current;
+      if (!t || !geo) return 0;
+      const left = el.getBoundingClientRect().left - t.getBoundingClientRect().left;
+      return Math.max(0, Math.floor(left / geo.stride));
+    },
+    [geo]
+  );
+
+  // Go to an absolute page (clamped) by sliding the track. Page position is pure
+  // state now, so rapid calls just retarget the same transition — no snap-back.
+  const goToPage = useCallback(
+    (page: number) => {
+      if (!geo) return;
+      const p = Math.max(0, Math.min(maxRef.current, page));
+      pageRef.current = p;
+      anchorRef.current = pageStartBlock(p * geo.stride);
+      setActive(null); // the popup's anchor rect is about to move off-screen
+      setAnimate(true);
+      setPg((s) => (s.page === p ? s : { ...s, page: p }));
+    },
+    [geo, pageStartBlock, setActive]
+  );
+
+  // Flip a page; at a section edge, cross into the adjacent section.
+  const flip = useCallback(
+    (dir: -1 | 1) => {
+      if (!geo) return;
+      const next = pageRef.current + dir;
+      if (next < 0) {
+        // Flipping back past the first page continues the read backward onto the
+        // previous section's *last* page (pendingEndRef tells resume to land there).
+        if (sectionIndex > 0) {
+          pendingEndRef.current = true;
+          setSection(sectionIndex - 1);
+        }
+        return;
+      }
+      if (next > maxRef.current) {
+        if (book && sectionIndex < book.sections.length - 1) setSection(sectionIndex + 1);
+        return;
+      }
+      goToPage(next);
+    },
+    [geo, sectionIndex, setSection, book, goToPage]
+  );
 
   // Arrow / Page keys flip pages (ignored while typing in an input).
   useEffect(() => {
@@ -181,29 +228,64 @@ export function Reader() {
     return () => window.removeEventListener("keydown", onKey);
   }, [paged, flip]);
 
-  // Swipe / trackpad scrolling: snap to the nearest page once it settles.
+  // Touch swipe: flip one page per horizontal swipe. We decide horizontal vs.
+  // vertical once, then preventDefault on horizontal moves so the swipe can't
+  // start a wild text selection. A flip is one page per gesture (a fling can't
+  // skip several), and a tap (little movement) falls through to tap-to-define.
   useEffect(() => {
+    if (!paged) return;
     const c = scrollRef.current;
-    if (!c || !geo) return;
-    let timer = 0;
-    const onScroll = () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        const page = Math.max(0, Math.min(pg.max, Math.round(c.scrollLeft / geo.stride)));
-        if (Math.abs(c.scrollLeft - page * geo.stride) > 1) c.scrollTo({ left: page * geo.stride, behavior: "smooth" });
-        setPg((p) => (p.page === page ? p : { ...p, page }));
-        // Remember the start-of-page block (now settled) so a later reflow can
-        // re-anchor to it. Keyed off the target page, not the live scroll, in
-        // case the snap-back above is still animating.
-        anchorRef.current = pageStartBlock(page * geo.stride);
-      }, 120);
+    if (!c) return;
+    let sx = 0, sy = 0, st = 0, swiping = false, decided = false;
+    const onStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      sx = t.clientX; sy = t.clientY; st = e.timeStamp; swiping = false; decided = false;
     };
-    c.addEventListener("scroll", onScroll, { passive: true });
+    const onMove = (e: TouchEvent) => {
+      const t = e.touches[0];
+      const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (!decided && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+        decided = true;
+        swiping = Math.abs(dx) > Math.abs(dy);
+      }
+      if (swiping) e.preventDefault(); // suppress selection/native scroll
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (!swiping) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - sx;
+      const dt = Math.max(1, e.timeStamp - st);
+      if (Math.abs(dx) > 45 || Math.abs(dx) / dt > 0.4) {
+        swipedRef.current = true; // the click that follows isn't a word tap
+        flip(dx < 0 ? 1 : -1);
+      }
+    };
+    c.addEventListener("touchstart", onStart, { passive: true });
+    c.addEventListener("touchmove", onMove, { passive: false });
+    c.addEventListener("touchend", onEnd, { passive: true });
     return () => {
-      c.removeEventListener("scroll", onScroll);
-      window.clearTimeout(timer);
+      c.removeEventListener("touchstart", onStart);
+      c.removeEventListener("touchmove", onMove);
+      c.removeEventListener("touchend", onEnd);
     };
-  }, [geo, pg.max]);
+  }, [paged, flip]);
+
+  // Trackpad / mouse wheel: a horizontal scroll gesture flips a page (throttled).
+  useEffect(() => {
+    if (!paged) return;
+    const c = scrollRef.current;
+    if (!c) return;
+    let last = 0;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return; // vertical — ignore
+      e.preventDefault();
+      if (e.timeStamp - last < 350) return;
+      if (e.deltaX > 20) { last = e.timeStamp; flip(1); }
+      else if (e.deltaX < -20) { last = e.timeStamp; flip(-1); }
+    };
+    c.addEventListener("wheel", onWheel, { passive: false });
+    return () => c.removeEventListener("wheel", onWheel);
+  }, [paged, flip]);
 
   // --- Hover to translate (optional) ---------------------------------------
   const [hover, setHover] = useState<HoverInfo | null>(null);
@@ -275,6 +357,11 @@ export function Reader() {
 
   const onClick = useCallback(
     (e: React.MouseEvent) => {
+      // The click that ends a swipe isn't a word tap — swallow it.
+      if (swipedRef.current) {
+        swipedRef.current = false;
+        return;
+      }
       // A selection takes precedence over tap-to-define. Check both the live
       // browser selection and our stored one: when a drag ends on a word the
       // browser may have already collapsed its selection by the time this click
@@ -359,9 +446,7 @@ export function Reader() {
     if (!el || !c) return;
     if (geo) {
       // Flip to the page the spoken block is on.
-      const page = pageOfEl(el);
-      setPg((p) => (p.page === page ? p : { ...p, page }));
-      c.scrollTo({ left: page * geo.stride, behavior: "smooth" });
+      goToPage(pageOfEl(el));
       return;
     }
     const er = el.getBoundingClientRect();
@@ -369,7 +454,7 @@ export function Reader() {
     if (er.top < cr.top + 48 || er.bottom > cr.bottom - 48) {
       el.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-  }, [ttsBlockId, geo, pageOfEl]);
+  }, [ttsBlockId, geo, pageOfEl, goToPage]);
 
   // --- Resume / jump scrolling --------------------------------------------
   useLayoutEffect(() => {
@@ -386,14 +471,20 @@ export function Reader() {
     }
     const target = resumeRef.current.target;
     trackingRef.current = false; // pause progress saving until we've anchored
+    setAnimate(false); // resume/section change jumps into place, never slides
     const apply = () => {
       const c = scrollRef.current;
+      const t = trackRef.current;
       const el = target != null ? blockEls.current.get(section?.blocks[target]?.id ?? "") : null;
       if (geo) {
-        const page = el ? pageOfEl(el) : 0;
-        anchorRef.current = target ?? 0; // anchor for any reflow before tracking resumes
-        setPg((p) => ({ ...p, page }));
-        c?.scrollTo({ left: page * geo.stride });
+        // Crossing backwards lands on the section's last page; otherwise on the
+        // page holding the resume/jump target (its first page by default).
+        const max = t ? Math.max(0, Math.round((t.scrollWidth - (c?.clientWidth ?? 0)) / geo.stride)) : 0;
+        const page = pendingEndRef.current ? max : el ? pageOfEl(el) : 0;
+        pageRef.current = page;
+        maxRef.current = max;
+        anchorRef.current = pendingEndRef.current ? pageStartBlock(page * geo.stride) : target ?? 0;
+        setPg((p) => (p.page === page && p.max === max ? p : { page, max }));
         return;
       }
       if (el) el.scrollIntoView({ block: "start" });
@@ -405,6 +496,7 @@ export function Reader() {
     // that wrong spot, corrupting the saved position for the next refresh).
     const raf = requestAnimationFrame(() => {
       apply();
+      pendingEndRef.current = false;
       trackingRef.current = true;
     });
     return () => cancelAnimationFrame(raf);
@@ -463,9 +555,22 @@ export function Reader() {
     return () => root.removeEventListener("scroll", onScroll);
   }, [setActive, clearHover]);
 
-  const registerBlock = useCallback((id: string) => (el: HTMLElement | null) => {
-    if (el) blockEls.current.set(id, el);
-    else blockEls.current.delete(id);
+  // A *stable* ref callback per block id. Returning a fresh function each render
+  // would make React detach + re-attach every block ref on every re-render; the
+  // overlay layout effects (earlier siblings than the <article>) would then run
+  // mid-swap and find the block map momentarily empty, so the active-word / TTS
+  // highlight wouldn't draw. Caching the callback keeps the map stable.
+  const refCbs = useRef<Map<string, (el: HTMLElement | null) => void>>(new Map());
+  const registerBlock = useCallback((id: string) => {
+    let cb = refCbs.current.get(id);
+    if (!cb) {
+      cb = (el: HTMLElement | null) => {
+        if (el) blockEls.current.set(id, el);
+        else blockEls.current.delete(id);
+      };
+      refCbs.current.set(id, cb);
+    }
+    return cb;
   }, []);
 
   const fontStyle = useMemo(() => ({ fontSize: `${(fontScale * 1.125).toFixed(3)}rem`, lineHeight: 1.95 }), [fontScale]);
@@ -477,58 +582,75 @@ export function Reader() {
       <div
         ref={scrollRef}
         className={`relative flex-1 overscroll-contain ${
-          geo ? "overflow-x-auto overflow-y-hidden" : "overflow-y-auto"
+          geo ? "overflow-hidden" : "overflow-y-auto"
         }`}
+        style={geo ? { touchAction: "pan-y" } : undefined}
         onClick={onClick}
         onMouseUp={onSelectionEnd}
         onTouchEnd={onSelectionEnd}
         onMouseMove={onMouseMove}
         onMouseLeave={clearHover}
       >
-        <TtsCursor blockEls={blockEls} scrollRef={scrollRef} />
-        <ActiveWordHighlight blockEls={blockEls} scrollRef={scrollRef} />
-        <article
-          data-testid="reader"
-          className={`font-reading text-slate-800 dark:text-slate-200 ${
-            geo ? "h-full" : "mx-auto max-w-2xl px-5 py-6"
-          }`}
+        {/* The track carries the page transform; overlays live inside it so they
+            travel with the columns (their boxes are measured against the track). */}
+        <div
+          ref={trackRef}
+          className={geo ? "relative h-full" : "relative"}
           style={
             geo
               ? {
-                  ...fontStyle,
-                  height: "100%",
-                  boxSizing: "border-box",
-                  padding: `24px ${geo.pad}px`,
-                  columnWidth: geo.colW || undefined,
-                  columnGap: geo.gap,
-                  columnFill: "auto",
+                  transform: `translateX(${-pg.page * geo.stride}px)`,
+                  transition: animate ? "transform 280ms ease-out" : "none",
+                  willChange: "transform",
                 }
-              : fontStyle
+              : undefined
           }
         >
-          <h1 className="mb-6 text-center text-2xl font-bold text-slate-900 dark:text-slate-100">
-            {section.title || book.title}
-          </h1>
-          {section.blocks.map((block, i) => (
-            <BlockView
-              key={block.id}
-              block={block}
-              bookId={book.id}
-              index={i}
-              isTts={ttsBlockId === block.id}
-              registerRef={registerBlock(block.id)}
-            />
-          ))}
+          <TtsCursor blockEls={blockEls} trackRef={trackRef} />
+          <ActiveWordHighlight blockEls={blockEls} trackRef={trackRef} />
+          <article
+            data-testid="reader"
+            className={`font-reading text-slate-800 dark:text-slate-200 ${
+              geo ? "h-full" : "mx-auto max-w-2xl px-5 py-6"
+            }`}
+            style={
+              geo
+                ? {
+                    ...fontStyle,
+                    height: "100%",
+                    boxSizing: "border-box",
+                    padding: `24px ${geo.pad}px`,
+                    columnWidth: geo.colW || undefined,
+                    columnGap: geo.gap,
+                    columnFill: "auto",
+                  }
+                : fontStyle
+            }
+          >
+            <h1 className="mb-6 text-center text-2xl font-bold text-slate-900 dark:text-slate-100">
+              {section.title || book.title}
+            </h1>
+            {section.blocks.map((block, i) => (
+              <BlockView
+                key={block.id}
+                block={block}
+                bookId={book.id}
+                index={i}
+                isTts={ttsBlockId === block.id}
+                registerRef={registerBlock(block.id)}
+              />
+            ))}
 
-          {!geo && (
-            <SectionNav
-              hasPrev={sectionIndex > 0}
-              hasNext={sectionIndex < book.sections.length - 1}
-              onPrev={() => setSection(sectionIndex - 1)}
-              onNext={() => setSection(sectionIndex + 1)}
-            />
-          )}
-        </article>
+            {!geo && (
+              <SectionNav
+                hasPrev={sectionIndex > 0}
+                hasNext={sectionIndex < book.sections.length - 1}
+                onPrev={() => setSection(sectionIndex - 1)}
+                onNext={() => setSection(sectionIndex + 1)}
+              />
+            )}
+          </article>
+        </div>
       </div>
 
       {geo && (
@@ -539,6 +661,7 @@ export function Reader() {
           canNext={pg.page < pg.max || sectionIndex < book.sections.length - 1}
           onPrev={() => flip(-1)}
           onNext={() => flip(1)}
+          onScrub={goToPage}
         />
       )}
 
@@ -636,29 +759,30 @@ function BlockView({
 }
 
 /** Translucent highlight over the word currently being read aloud. Positioned
- *  in the scroll container's content space so it scrolls along with the text,
- *  and isolated in its own component so per-word updates don't re-render the
- *  whole section. */
+ *  inside the track (content space) so it travels with the text — scrolling in
+ *  scroll mode, the page transform in paged mode — and isolated in its own
+ *  component so per-word updates don't re-render the whole section. */
 function TtsCursor({
   blockEls,
-  scrollRef,
+  trackRef,
 }: {
   blockEls: React.MutableRefObject<Map<string, HTMLElement>>;
-  scrollRef: React.RefObject<HTMLDivElement>;
+  trackRef: React.RefObject<HTMLDivElement>;
 }) {
   const word = useReader((s) => s.ttsWord);
   const [boxes, setBoxes] = useState<{ top: number; left: number; width: number; height: number }[]>([]);
 
   useLayoutEffect(() => {
     const el = word ? blockEls.current.get(word.blockId) : null;
-    const c = scrollRef.current;
-    if (!word || !el || !c) return setBoxes([]);
+    const t = trackRef.current;
+    if (!word || !el || !t) return setBoxes([]);
     // One box per visual line, so a sentence-length highlight (OpenAI engine)
-    // wraps cleanly instead of drawing one overshooting rectangle.
+    // wraps cleanly instead of drawing one overshooting rectangle. Measured
+    // against the track, so the page transform cancels out.
     const rects = rectsForRange(el, word.start, word.end).filter((r) => r.width > 0);
-    const cr = c.getBoundingClientRect();
-    setBoxes(rects.map((r) => ({ top: r.top - cr.top + c.scrollTop, left: r.left - cr.left + c.scrollLeft, width: r.width, height: r.height })));
-  }, [word, blockEls, scrollRef]);
+    const tr = t.getBoundingClientRect();
+    setBoxes(rects.map((r) => ({ top: r.top - tr.top, left: r.left - tr.left, width: r.width, height: r.height })));
+  }, [word, blockEls, trackRef]);
 
   if (!boxes.length) return null;
   return (
@@ -680,10 +804,10 @@ function TtsCursor({
  *  text node — which would otherwise collapse a double-click / drag selection. */
 function ActiveWordHighlight({
   blockEls,
-  scrollRef,
+  trackRef,
 }: {
   blockEls: React.MutableRefObject<Map<string, HTMLElement>>;
-  scrollRef: React.RefObject<HTMLDivElement>;
+  trackRef: React.RefObject<HTMLDivElement>;
 }) {
   const active = useReader((s) => s.active);
   const book = useReader((s) => s.book);
@@ -693,12 +817,12 @@ function ActiveWordHighlight({
   useLayoutEffect(() => {
     const block = active ? book?.sections[sectionIndex]?.blocks[active.position.blockIndex] : null;
     const el = block ? blockEls.current.get(block.id) : null;
-    const c = scrollRef.current;
-    if (!active || !el || !c) return setBoxes([]);
+    const t = trackRef.current;
+    if (!active || !el || !t) return setBoxes([]);
     const rects = rectsForRange(el, active.token.start, active.token.end).filter((r) => r.width > 0);
-    const cr = c.getBoundingClientRect();
-    setBoxes(rects.map((r) => ({ top: r.top - cr.top + c.scrollTop, left: r.left - cr.left + c.scrollLeft, width: r.width, height: r.height })));
-  }, [active, book, sectionIndex, blockEls, scrollRef]);
+    const tr = t.getBoundingClientRect();
+    setBoxes(rects.map((r) => ({ top: r.top - tr.top, left: r.left - tr.left, width: r.width, height: r.height })));
+  }, [active, book, sectionIndex, blockEls, trackRef]);
 
   if (!boxes.length) return null;
   return (
@@ -717,8 +841,9 @@ interface HoverInfo {
   rect: DOMRect;
 }
 
-/** Flip-through controls for paged mode: tappable edge zones (left/right) and a
- *  small page indicator. Rendered outside the scroller so they stay put. */
+/** Flip-through controls for paged mode: tappable edge zones (left/right), a
+ *  page indicator, and a scrubber to skip to any page. Rendered outside the
+ *  scroller so they stay put. */
 function PageControls({
   page,
   max,
@@ -726,6 +851,7 @@ function PageControls({
   canNext,
   onPrev,
   onNext,
+  onScrub,
 }: {
   page: number;
   max: number;
@@ -733,6 +859,7 @@ function PageControls({
   canNext: boolean;
   onPrev: () => void;
   onNext: () => void;
+  onScrub: (page: number) => void;
 }) {
   return (
     <>
@@ -752,8 +879,21 @@ function PageControls({
       >
         <IconChevronRight className="h-6 w-6 opacity-40 transition-opacity group-hover:opacity-100" />
       </button>
-      <div className="pointer-events-none absolute bottom-1 left-1/2 -translate-x-1/2 text-xs tabular-nums text-slate-400 dark:text-slate-500">
-        {page + 1} / {max + 1}
+      <div className="absolute inset-x-0 bottom-1 flex items-center justify-center gap-2 px-16">
+        {max > 0 && (
+          <input
+            type="range"
+            min={0}
+            max={max}
+            value={page}
+            aria-label="Skip to page"
+            onChange={(e) => onScrub(Number(e.target.value))}
+            className="h-1 w-40 max-w-[45%] cursor-pointer accent-sky-500"
+          />
+        )}
+        <span className="pointer-events-none text-xs tabular-nums text-slate-400 dark:text-slate-500">
+          {page + 1} / {max + 1}
+        </span>
       </div>
     </>
   );
